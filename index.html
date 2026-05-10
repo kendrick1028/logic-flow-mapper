@@ -312,6 +312,12 @@
                   <label class="batch-label">AI 모델</label>
                   <select id="batchModel" class="form-control"></select>
                 </div>
+                <div class="batch-row batch-row-checkbox">
+                  <label class="batch-checkbox-label">
+                    <input type="checkbox" id="batchForceReanalyze">
+                    <span>이미 분석된 지문도 다시 분석</span>
+                  </label>
+                </div>
                 <div class="batch-actions">
                   <button class="btn-analyze" id="batchStartBtn" onclick="startBatchJob()">일괄 분석 시작</button>
                 </div>
@@ -804,10 +810,6 @@
       <!-- 꼼꼼분석 Panel -->
       <div class="panel" id="panel-grammar" style="display:none">
         <div class="result" id="grammarResult">
-          <div id="grammarActions" style="display:none">
-            <button class="action-btn action-btn-pdf" onclick="downloadDetailPDF(event)">PDF 다운로드</button>
-            <button class="action-btn action-btn-save" id="btnSaveAnalysis" onclick="saveDetailAnalysis()">서버에 저장</button>
-          </div>
           <!-- 어휘 / Logic Flow / 어법 분석 — 3개 카드 (메타·지문구조 카드 제거됨) -->
           <div class="sec-card" id="vocabCard" style="display:none">
             <div class="tag t3">어휘</div>
@@ -830,6 +832,11 @@
               <span><span class="gr-special">spc</span> 특수구문</span>
             </div>
             <div class="sec-content" id="g0"></div>
+          </div>
+          <div id="grammarActions" style="display:none">
+            <button class="action-btn action-btn-reanalyze" id="btnReanalyze" onclick="reanalyzeCurrent()">재분석</button>
+            <button class="action-btn action-btn-pdf" onclick="downloadDetailPDF(event)">PDF 다운로드</button>
+            <button class="action-btn action-btn-save" id="btnSaveAnalysis" onclick="saveDetailAnalysis()">서버에 저장</button>
           </div>
         </div>
       </div>

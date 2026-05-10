@@ -291,6 +291,21 @@ function clearManual() {
   updateManualBtnState();
 }
 
+// 결과 패널 하단의 "재분석" 버튼 — 현재 선택(또는 직접입력) 지문을 새로 분석.
+// 이미 저장된/표시된 분석이 있어도 무조건 새 분석을 실행한다.
+function reanalyzeCurrent() {
+  const passage = getSelectedPassage();
+  const manualText = manualMode ? (document.getElementById('manualInput').value || '').trim() : '';
+  const text = manualMode ? manualText : passage;
+  if (!text) {
+    alert('재분석할 지문을 찾지 못했습니다. 좌측에서 지문을 선택하거나 직접 입력하세요.');
+    return;
+  }
+  activateSplitLayout();
+  if (currentPanel === 'grammar') runDetailAnalysis(text);
+  else analyzeCurrentMode();
+}
+
 function analyzeCurrentMode() {
   const passage = getSelectedPassage();
   if (!passage && !manualMode) return;

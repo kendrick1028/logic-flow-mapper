@@ -111,6 +111,7 @@ function startBatchJob() {
 
   const provider = document.getElementById('batchProvider').value;
   const model = document.getElementById('batchModel').value;
+  const forceReanalyze = !!document.getElementById('batchForceReanalyze')?.checked;
 
   const queue = selections;  // [{book, unit, num, passage}]
 
@@ -128,6 +129,7 @@ function startBatchJob() {
     provider,
     model,
     option: null,
+    forceReanalyze,
     phase: 'prepare',
     phaseStates: { prepare: 'active', running: 'pending', buildPdf: 'pending', done: 'pending' },
     subLabel: '준비 중...',
@@ -161,10 +163,10 @@ async function runBatchPipeline(job) {
 
     const docId = `${item.book}__${item.unit}__${item.num}`;
 
-    // Skip if already saved in Firestore
+    // Skip if already saved in Firestore (forceReanalyze 가 켜져 있으면 스킵하지 않음)
     try {
-      const existing = await db.collection('analyses').doc(docId).get();
-      if (existing.exists) {
+      const existing = job.forceReanalyze ? null : await db.collection('analyses').doc(docId).get();
+      if (existing && existing.exists) {
         job.results[docId] = 'skipped';
         job.skipped++;
         job.done++;

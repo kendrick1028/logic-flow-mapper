@@ -172,6 +172,8 @@ select:focus{border-color:#4f6ef7;background-color:#fff}
 .action-btn-pdf:hover{background:#3a58e0}
 .action-btn-save{background:#4f6ef7;color:#fff}
 .action-btn-save:hover{background:#3a58e0}
+.action-btn-reanalyze{background:#10b981;color:#fff}
+.action-btn-reanalyze:hover{background:#059669}
 
 /* ── 기출코드 위첨자 ── */
 .gc-sup{font-size:9px;color:#4f6ef7;font-weight:700;vertical-align:super;margin-right:1px;line-height:1}
@@ -433,12 +435,17 @@ tr:last-child td{border-bottom:none}
 .home-card{background:#fff;border:1px solid #e9ecf3;border-radius:14px;padding:22px 24px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
 .home-card-title{font-size:17px;font-weight:800;color:var(--c-ink);margin:0 0 6px;letter-spacing:-.2px}
 .home-card-desc{font-size:13px;color:#8992a8;margin:0 0 18px;line-height:1.55}
-.batch-controls{display:flex;flex-direction:column;gap:0}
+.batch-controls{display:flex;flex-direction:column;gap:0;flex:1 1 auto;min-height:0}
 .batch-row{display:flex;align-items:center;gap:14px;margin-bottom:14px}
 .batch-row:last-child{margin-bottom:0}
 .batch-label{font-size:12px;font-weight:700;color:#7a8196;min-width:100px;letter-spacing:.01em}
 .batch-row > .form-control,.batch-row > select,.batch-row > input{flex:1;min-width:0}
-.batch-actions{display:flex;gap:10px;margin-top:20px;padding-top:18px;border-top:1px dashed #eef0f5}
+.batch-row-checkbox{margin-top:6px}
+.batch-checkbox-label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#374151;cursor:pointer;user-select:none}
+.batch-checkbox-label input[type="checkbox"]{width:16px;height:16px;accent-color:#6366f1;cursor:pointer}
+.batch-actions{display:flex;gap:10px;margin-top:auto;padding-top:18px;border-top:1px dashed #eef0f5}
+.panel-split-mid > .home-card > .batch-controls,
+.panel-split-mid .home-card{display:flex;flex-direction:column}
 .batch-progress-bar{width:100%;height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden;margin:12px 0 8px}
 .batch-progress-fill{height:100%;background:linear-gradient(90deg,#4f6ef7,#6b8cff);border-radius:4px;transition:width .3s;width:0}
 .batch-progress-text{font-size:12px;color:#666;margin-bottom:12px}
