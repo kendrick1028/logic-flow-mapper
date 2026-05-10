@@ -1,0 +1,14 @@
+{
+  "name": "logic-flow-mapper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Logic Flow Mapper — 영어 지문 분석 / 변형 문제 생성 도구. Claude Code CLI + Gemini/OpenAI API 사용.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

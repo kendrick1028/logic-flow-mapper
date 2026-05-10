@@ -1,0 +1,18 @@
+node_modules/
+.vercel/
+.env
+.env.local
+.env*.local
+.DS_Store
+Thumbs.db
+
+# 개인 자료/테스트 파일 (저작권 자료 포함 가능 — 커밋 금지)
+*.rtf
+*.pdf
+송유근영어*.png
+
+# 외부 참조 (unrelated reference material)
+awesome-design-md-main/
+
+# Claude Code 로컬 설정 (개인 머신 경로 포함)
+.claude/
