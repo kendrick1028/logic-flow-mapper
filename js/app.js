@@ -1398,13 +1398,29 @@ function renderGrammar(data) {
   const g0 = document.getElementById('g0');
   if (!g0) return;
   let h = '';
+
+  // 실패한 문장 개수 — 상단 "전체 재시도" 버튼
+  const failedCount = sentences.filter(s => s && s._error).length;
+  if (failedCount > 0) {
+    h += `<div class="gm-retry-banner">
+      <span>⚠ 분석 실패한 문장 <b>${failedCount}개</b> 있습니다.</span>
+      <button class="gm-retry-all-btn" onclick="retryAllFailedGrammar()">🔄 모두 다시 분석</button>
+    </div>`;
+  }
+
   sentences.forEach(s => {
-    h += `<div class="gm-sentence">`;
-    // 문장 헤더: 번호만 (문장형식은 슬래시 자체로 시각화되므로 별도 뱃지 불필요)
+    if (!s) return;
+    const errMode = !!s._error;
+    h += `<div class="gm-sentence${errMode ? ' gm-sentence-error' : ''}" data-sid="${s.id}" data-text="${esc(s.text || '')}">`;
+    // 문장 헤더: 번호 + (실패시) 재시도 버튼
     const sp = Array.isArray(s.specialPatterns) ? s.specialPatterns : [];
     h += `<div class="gm-sent-header">
       <span class="gm-sent-num">${s.id}</span>
+      ${errMode ? `<button class="gm-retry-btn" onclick="retryGrammarSentence(${s.id})" title="이 문장만 다시 분석">🔄 다시 분석</button>` : ''}
     </div>`;
+    if (errMode) {
+      h += `<div class="gm-error-note">⚠ 분석 실패: ${esc(s._error)} — 위 버튼으로 재시도</div>`;
+    }
 
     // 어법 라인 — annotations 우선, 구 tokens 폴백, 그 외엔 원문 그대로
     // 핵심 포인트 anchor 위치에 미주번호 마커 삽입
@@ -1467,6 +1483,103 @@ function renderGrammar(data) {
     h += `</div>`;
   });
   g0.innerHTML = h;
+}
+
+// ── 실패한 문장 단일 재시도 ──────────────────────────────────
+// 호출 후: lastDetailResult 갱신 → renderGrammar 전체 재실행 + Firestore 동기화
+async function retryGrammarSentence(id) {
+  const cardEl = document.querySelector(`#g0 .gm-sentence[data-sid="${id}"]`);
+  if (!cardEl) return false;
+  const sentText = cardEl.getAttribute('data-text');
+  if (!sentText) return false;
+
+  const btn = cardEl.querySelector('.gm-retry-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 재분석 중...'; }
+  cardEl.classList.add('gm-retrying');
+
+  try {
+    const r = await callAI(currentProvider, currentModel, sentText, GRAMMAR_PER_SENTENCE_PROMPT, null, currentOption);
+    let newS = null;
+    if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) newS = r.parsed.sentences[0];
+    else if (r.parsed && r.parsed.id != null) newS = r.parsed;
+    if (!newS || !Array.isArray(newS.annotations)) throw new Error('invalid response format');
+    newS.id = id;
+    if (!newS.text) newS.text = sentText;
+
+    // 메모리 결과 — lastDetailResult 우선, 없으면 DOM 으로부터 재구성
+    if (!lastDetailResult) lastDetailResult = {};
+    if (!lastDetailResult.grammar) {
+      // DOM 에서 현재 sentences 재구성 (단순화: 빈 sentences 배열로 시작)
+      lastDetailResult.grammar = { sentences: [] };
+    }
+    const list = lastDetailResult.grammar.sentences;
+    const idx = list.findIndex(s => s && s.id === id);
+    if (idx >= 0) list[idx] = newS;
+    else list.push(newS);
+    list.sort((a, b) => (a.id || 0) - (b.id || 0));
+
+    renderGrammar(lastDetailResult.grammar);
+    await persistGrammarUpdate(id, newS);
+    return true;
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 다시 분석'; }
+    cardEl.classList.remove('gm-retrying');
+    console.error('[retryGrammarSentence]', e);
+    alert(`재분석 실패: ${e.message || e}`);
+    return false;
+  }
+}
+
+// ── 모든 실패 문장 일괄 재시도 (병렬) ────────────────────────
+async function retryAllFailedGrammar() {
+  const failedCards = Array.from(document.querySelectorAll('#g0 .gm-sentence-error'));
+  if (!failedCards.length) return;
+  const banner = document.querySelector('#g0 .gm-retry-banner');
+  const allBtn = banner ? banner.querySelector('.gm-retry-all-btn') : null;
+  if (allBtn) { allBtn.disabled = true; allBtn.textContent = '⏳ 재분석 중...'; }
+
+  const ids = failedCards.map(el => parseInt(el.getAttribute('data-sid'), 10)).filter(Number.isFinite);
+  const results = await Promise.allSettled(ids.map(id => retryGrammarSentence(id)));
+  const success = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+  const fail = results.length - success;
+
+  if (allBtn) {
+    allBtn.disabled = false;
+    allBtn.textContent = '🔄 모두 다시 분석';
+  }
+  // alert 으로 결과 알림
+  if (fail === 0) alert(`✅ ${success}개 문장 재분석 완료`);
+  else alert(`재분석 — 성공 ${success} · 실패 ${fail}`);
+}
+
+// Firestore 의 grammar.sentences 배열 안 특정 문장만 업데이트
+async function persistGrammarUpdate(sentenceId, newSentence) {
+  try {
+    const u = document.getElementById('selUnit')?.value;
+    const n = document.getElementById('selNum')?.value;
+    if (!u || !n || manualMode) return;
+    if (typeof db === 'undefined' || !currentUser) return;
+    const docId = analysisDocId(currentBook, u, n);
+    const ref = db.collection('analyses').doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const data = snap.data();
+    const sentences = (data.grammar && data.grammar.sentences) || [];
+    const idx = sentences.findIndex(s => s && s.id === sentenceId);
+    if (idx >= 0) sentences[idx] = newSentence;
+    else sentences.push(newSentence);
+    await ref.update({
+      'grammar.sentences': sentences,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    console.warn('Firestore grammar update failed:', e);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.retryGrammarSentence = retryGrammarSentence;
+  window.retryAllFailedGrammar = retryAllFailedGrammar;
 }
 
 async function downloadDetailPDF(ev) {
