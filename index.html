@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Logic Flow Mapper</title>
-<link rel="stylesheet" href="css/style.css?v=27">
+<link rel="stylesheet" href="css/style.css?v=28">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -118,6 +118,10 @@
       <span class="api-mode-label" id="apiModeLabel"></span>
       <span class="api-mode-sub" id="apiModeSub"></span>
     </div>
+    <button type="button" class="claude-connect-btn" id="claudeConnectBtn" style="display:none" onclick="startClaudeLogin()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+      <span id="claudeConnectLabel">Claude 연결</span>
+    </button>
     <button type="button" id="apiKeySettingsBtn" class="api-key-settings-btn" onclick="openApiKeySettings()" title="Gemini / OpenAI API 키 설정">API 키 설정</button>
   </div>
 
@@ -887,7 +891,7 @@
 <script src="js/db-buildup.js?v=1"></script>
 <script src="js/db-readingmaster.js?v=1"></script>
 <script src="js/db-hackers.js?v=2"></script>
-<script src="js/api.js?v=28"></script>
+<script src="js/api.js?v=29"></script>
 <script src="js/progress-checklist.js?v=2"></script>
 <script src="js/job-manager.js?v=3"></script>
 <script src="js/app.js?v=32"></script>

@@ -1370,7 +1370,38 @@ sup.gr-omit-tag{
   padding-left:6px;border-left:1px solid currentColor;
   border-color:rgba(0,0,0,.1);
 }
-.hdr{display:flex;align-items:center;gap:14px}
+.hdr{display:flex;align-items:center;gap:10px}
+
+/* Claude 연결 버튼 */
+.claude-connect-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:7px 13px;border-radius:8px;
+  background:linear-gradient(135deg, #ff8a4c, #f06d33);
+  color:#fff;border:none;
+  font-size:12.5px;font-weight:700;letter-spacing:-.1px;
+  cursor:pointer;
+  box-shadow:0 1px 4px rgba(240,109,51,.25);
+  transition:transform .12s, box-shadow .15s, opacity .15s;
+  font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,'Segoe UI',sans-serif;
+}
+.claude-connect-btn:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 3px 10px rgba(240,109,51,.35);
+}
+.claude-connect-btn:active:not(:disabled){transform:translateY(0)}
+.claude-connect-btn:disabled{opacity:.7;cursor:wait}
+.claude-connect-btn svg{flex-shrink:0}
+.claude-connect-btn.connecting{
+  background:linear-gradient(135deg, #fa9b6a, #f1864e);
+}
+.claude-connect-btn.connecting svg{animation:spin 1.2s linear infinite}
+.claude-connect-btn.success{
+  background:linear-gradient(135deg, #10b981, #059669);
+}
+@keyframes spin{
+  from{transform:rotate(0deg)}
+  to{transform:rotate(360deg)}
+}
 
 /* API 키 설정 버튼 */
 .api-key-settings-btn{

@@ -283,13 +283,97 @@ async function handleClaudePdf(req, res) {
   }
 }
 
+// ── /api/claude-auth — CLI 인증 상태 확인 + 로그인 트리거 ──
+function checkClaudeAuth() {
+  return new Promise((resolve) => {
+    const proc = spawn(resolveClaudeBin(), [
+      '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '1', 'ok'
+    ], { stdio: ['ignore', 'pipe', 'pipe'], shell: IS_WINDOWS });
+    let stdoutBuf = '', stderrBuf = '';
+    const timer = setTimeout(() => { proc.kill('SIGKILL'); resolve({ status: 'timeout' }); }, 12_000);
+    proc.stdout.on('data', d => { stdoutBuf += d.toString(); });
+    proc.stderr.on('data', d => { stderrBuf += d.toString(); });
+    proc.on('error', err => {
+      clearTimeout(timer);
+      if (err.code === 'ENOENT') {
+        resolve({ status: 'not_installed', message: 'claude CLI 가 설치되지 않았습니다. `npm i -g @anthropic-ai/claude-code` 로 설치하세요.' });
+      } else {
+        resolve({ status: 'error', message: err.message });
+      }
+    });
+    proc.on('close', code => {
+      clearTimeout(timer);
+      const combined = stdoutBuf + stderrBuf;
+      if (/Not logged in|Invalid authentication|Please run \/login|401/i.test(combined)) {
+        return resolve({ status: 'not_logged_in', message: '로그인 필요' });
+      }
+      if (code === 0 && stdoutBuf.length > 0) return resolve({ status: 'ok', message: '인증됨' });
+      resolve({ status: 'error', message: `claude CLI 에러 (code ${code})` });
+    });
+  });
+}
+
+function startClaudeLogin() {
+  return new Promise((resolve) => {
+    const proc = spawn(resolveClaudeBin(), ['setup-token'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WINDOWS,
+      detached: false
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    let resolved = false;
+    const finishOnce = (data) => { if (!resolved) { resolved = true; resolve(data); } };
+
+    const tryCaptureUrl = (text) => {
+      const m = text.match(/(https?:\/\/[^\s]+(?:claude\.ai|anthropic\.com)[^\s]*)/i);
+      if (m) finishOnce({ status: 'login_started', authUrl: m[1], message: '브라우저에서 인증 진행 중...' });
+    };
+
+    proc.stdout.on('data', d => { const t = d.toString(); stdoutBuf += t; tryCaptureUrl(t); });
+    proc.stderr.on('data', d => { const t = d.toString(); stderrBuf += t; tryCaptureUrl(t); });
+
+    proc.on('error', err => {
+      if (err.code === 'ENOENT') finishOnce({ status: 'not_installed', message: 'claude CLI 가 설치되지 않았습니다.' });
+      else finishOnce({ status: 'error', message: err.message });
+    });
+
+    proc.on('close', code => {
+      if (code === 0) finishOnce({ status: 'login_complete', message: '인증 완료' });
+      else finishOnce({ status: 'error', message: `setup-token 실패 (code ${code})`, detail: (stdoutBuf + stderrBuf).slice(0, 300) });
+    });
+
+    // URL 못 잡으면 5초 후 OK 응답 (CLI 가 브라우저 직접 열었을 수도)
+    setTimeout(() => finishOnce({ status: 'login_started', message: 'claude CLI 가 시작되었습니다.' }), 5000);
+  });
+}
+
+async function handleClaudeAuth(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const queryAction = url.searchParams.get('action');
+  let bodyAction = null;
+  if (req.method === 'POST') {
+    try { const body = await readJson(req); bodyAction = body && body.action; }
+    catch (e) { /* ignore */ }
+  }
+  const action = bodyAction || queryAction || 'status';
+
+  try {
+    if (action === 'status') return sendJson(res, 200, await checkClaudeAuth());
+    if (action === 'login')  return sendJson(res, 200, await startClaudeLogin());
+    sendJson(res, 400, { error: 'Unknown action: ' + action });
+  } catch (e) {
+    console.error('[api/claude-auth] error:', e.message);
+    sendJson(res, 500, { error: e.message });
+  }
+}
+
 // ── 라우터 ──
 const server = http.createServer((req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(200, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     return res.end();
@@ -297,6 +381,7 @@ const server = http.createServer((req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
   if (urlPath === '/api/claude'      && req.method === 'POST') return handleClaude(req, res);
   if (urlPath === '/api/claude-pdf'  && req.method === 'POST') return handleClaudePdf(req, res);
+  if (urlPath === '/api/claude-auth')                          return handleClaudeAuth(req, res);
   if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res);
   sendJson(res, 405, { error: 'Method not allowed' });
 });

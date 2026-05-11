@@ -968,8 +968,114 @@ async function probeApiMode() {
   } catch (e) {
     updateApiModeBadge('error', { error: e.message });
   }
+  // 인증 상태에 따라 "Claude 연결" 버튼 표시 토글
+  await refreshClaudeConnectButton();
 }
 window.addEventListener('load', () => { setTimeout(probeApiMode, 800); });
+
+// ── Claude CLI 연결 UI ─────────────────────────────────────────
+// 인증 안 됐을 때 "Claude 연결" 버튼 표시.
+// 버튼 누르면 백엔드가 `claude setup-token` 실행 → 브라우저 자동 OAuth → 인증 후 자동 감지.
+async function refreshClaudeConnectButton() {
+  const btn = document.getElementById('claudeConnectBtn');
+  if (!btn) return;
+  try {
+    const res = await fetch(PROXY_BASE + '/api/claude-auth?action=status');
+    const data = await res.json();
+    if (data.status === 'ok') {
+      btn.style.display = 'none';
+    } else {
+      btn.style.display = '';
+      btn.classList.remove('connecting');
+      const lbl = document.getElementById('claudeConnectLabel');
+      if (lbl) {
+        if (data.status === 'not_installed') lbl.textContent = 'Claude CLI 설치 필요';
+        else if (data.status === 'not_logged_in') lbl.textContent = '🔌 Claude 연결';
+        else lbl.textContent = '🔌 Claude 연결';
+      }
+    }
+  } catch (e) {
+    // 백엔드 다운 등 — 버튼 숨김
+    btn.style.display = 'none';
+  }
+}
+
+async function startClaudeLogin() {
+  const btn = document.getElementById('claudeConnectBtn');
+  const lbl = document.getElementById('claudeConnectLabel');
+  if (!btn) return;
+  btn.classList.add('connecting');
+  if (lbl) lbl.textContent = '연결 중…';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(PROXY_BASE + '/api/claude-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login' })
+    });
+    const data = await res.json();
+
+    if (data.status === 'not_installed') {
+      alert('Claude CLI 가 설치되지 않았습니다.\n터미널에서 다음을 실행하세요:\n\nnpm install -g @anthropic-ai/claude-code');
+      btn.classList.remove('connecting');
+      btn.disabled = false;
+      if (lbl) lbl.textContent = '🔌 Claude 연결';
+      return;
+    }
+    if (data.authUrl) {
+      // 백엔드에서 OAuth URL 받았으면 새 탭 자동 열기
+      window.open(data.authUrl, '_blank', 'noopener');
+    }
+    // 이미 로그인 완료
+    if (data.status === 'login_complete' || data.status === 'ok') {
+      if (lbl) lbl.textContent = '✅ 연결됨';
+      setTimeout(refreshClaudeConnectButton, 800);
+      return;
+    }
+
+    // 폴링: 2초 간격으로 최대 5분
+    if (lbl) lbl.textContent = '브라우저 인증 대기 중…';
+    const startTs = Date.now();
+    const pollInterval = setInterval(async () => {
+      try {
+        const sr = await fetch(PROXY_BASE + '/api/claude-auth?action=status');
+        const sd = await sr.json();
+        if (sd.status === 'ok') {
+          clearInterval(pollInterval);
+          if (lbl) lbl.textContent = '✅ 연결 완료!';
+          btn.classList.add('success');
+          // 1초 후 배지 갱신 + 버튼 숨김
+          setTimeout(async () => {
+            await probeApiMode();
+            btn.classList.remove('success', 'connecting');
+            btn.disabled = false;
+          }, 1200);
+          return;
+        }
+        // 5분 타임아웃
+        if (Date.now() - startTs > 5 * 60 * 1000) {
+          clearInterval(pollInterval);
+          btn.classList.remove('connecting');
+          btn.disabled = false;
+          if (lbl) lbl.textContent = '🔌 다시 시도';
+        }
+      } catch (e) { /* 폴링 재시도 */ }
+    }, 2000);
+
+  } catch (e) {
+    alert('Claude 연결 실패: ' + e.message);
+    btn.classList.remove('connecting');
+    btn.disabled = false;
+    if (lbl) lbl.textContent = '🔌 Claude 연결';
+  }
+}
+
+// 전역으로 노출 (HTML onclick 에서 호출)
+if (typeof window !== 'undefined') {
+  window.startClaudeLogin = startClaudeLogin;
+  window.refreshClaudeConnectButton = refreshClaudeConnectButton;
+}
 
 // ──────────────────────────────────────────────────────────────────
 // 어법 분석 — 문장 단위 병렬 호출 (timeout 회피)
