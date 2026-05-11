@@ -1095,47 +1095,78 @@ function splitIntoSentences(text) {
   return parts.map(p => p.replace(//g, '.').trim()).filter(Boolean);
 }
 
-// 어법 분석 — 한 지문 → 문장별 병렬 호출 → 결과 머지
+// 어법 분석 — 한 지문 → 문장별 병렬 호출 + 실패 문장 자동 재시도
+//   1차 병렬 분석 → 실패한 문장만 모아 재시도 (최대 3차, 2초 간격 백오프)
 async function callGrammarChunked(provider, model, passage, externalSignal, option) {
   const sentences = splitIntoSentences(passage);
   if (!sentences.length) return { parsed: { sentences: [] }, usage: null };
 
-  // 각 문장 병렬 호출 — id 부여
-  const promises = sentences.map((sentText, idx) => {
-    const id = idx + 1;
+  // 단일 문장 분석 — 성공 시 {sentence,usage}, 실패 시 throw
+  const analyzeOne = async (sentText, id) => {
     const userMsg = `[입력 문장 — id=${id}]\n${sentText}\n\n위 문장(id=${id})을 분석하여 JSON 객체 1개만 출력. id 필드는 반드시 ${id}.`;
-    return callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, externalSignal, option)
-      .then(r => {
-        // 응답이 { sentences: [...] } 형태일 수도, 객체 단일일 수도
-        let s = null;
-        if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) {
-          s = r.parsed.sentences[0];
-        } else if (r.parsed && r.parsed.id != null) {
-          s = r.parsed;
-        }
-        if (!s) return { id, text: sentText, translation: '', annotations: [], specialPatterns: [], _error: 'invalid format' };
-        // 안전: id 강제 + text 누락 시 원문
-        s.id = id;
-        if (!s.text) s.text = sentText;
-        return { sentence: s, usage: r.usage };
-      })
-      .catch(e => ({
-        sentence: { id, text: sentText, translation: '', annotations: [], specialPatterns: [], _error: e.message || String(e) },
-        usage: null
-      }));
+    const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, externalSignal, option);
+    let s = null;
+    if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) s = r.parsed.sentences[0];
+    else if (r.parsed && r.parsed.id != null) s = r.parsed;
+    if (!s || !Array.isArray(s.annotations)) throw new Error('invalid response format (annotations missing)');
+    s.id = id;
+    if (!s.text) s.text = sentText;
+    return { sentence: s, usage: r.usage };
+  };
+
+  // 결과 슬롯 (index 별로 채워짐)
+  const results = new Array(sentences.length).fill(null);
+  // 1차: 모든 문장 병렬 시도
+  let pending = sentences.map((text, idx) => ({ index: idx, id: idx + 1, text, lastError: null }));
+
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && pending.length > 0; attempt++) {
+    if (externalSignal && externalSignal.aborted) break;
+    if (attempt > 1) {
+      console.warn(`[grammar] 재시도 ${attempt - 1} 차 — 실패 ${pending.length} 문장`);
+      // 백오프: 2초, 5초
+      await new Promise(r => setTimeout(r, attempt === 2 ? 2000 : 5000));
+      if (externalSignal && externalSignal.aborted) break;
+    }
+    const settled = await Promise.allSettled(
+      pending.map(p => analyzeOne(p.text, p.id))
+    );
+    const stillFailed = [];
+    settled.forEach((s, k) => {
+      const p = pending[k];
+      if (s.status === 'fulfilled') {
+        results[p.index] = s.value;
+      } else {
+        const errMsg = (s.reason && s.reason.message) || String(s.reason);
+        stillFailed.push({ ...p, lastError: errMsg });
+      }
+    });
+    pending = stillFailed;
+  }
+
+  // 끝까지 실패한 문장 — _error 플래그 + 원문만 표시
+  pending.forEach(p => {
+    console.error(`[grammar] 최종 실패 — id=${p.id}: ${p.lastError}`);
+    results[p.index] = {
+      sentence: {
+        id: p.id, text: p.text, translation: '',
+        annotations: [], specialPatterns: [],
+        _error: p.lastError || 'analysis failed after retries'
+      },
+      usage: null
+    };
   });
 
-  const results = await Promise.all(promises);
   // usage 누적
   const aggUsage = { input_tokens: 0, output_tokens: 0, cached_tokens: 0 };
   results.forEach(r => {
-    if (r.usage) {
+    if (r && r.usage) {
       aggUsage.input_tokens += r.usage.input_tokens || 0;
       aggUsage.output_tokens += r.usage.output_tokens || 0;
       aggUsage.cached_tokens += r.usage.cached_tokens || 0;
     }
   });
-  const merged = results.map(r => r.sentence).sort((a, b) => (a.id || 0) - (b.id || 0));
+  const merged = results.map(r => r ? r.sentence : null).filter(Boolean).sort((a, b) => (a.id || 0) - (b.id || 0));
   return { parsed: { sentences: merged }, usage: aggUsage };
 }
 

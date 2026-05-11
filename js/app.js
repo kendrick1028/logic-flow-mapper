@@ -1745,7 +1745,7 @@ async function downloadDetailPDF(ev) {
     // 꼬릿말 — 상단 파란 구분선
     const ftrEl = document.createElement('div');
     ftrEl.style.cssText = `width:${captureWidth}px;padding:8px 0 0;border-top:2.5px solid ${HEADER_BLUE};display:flex;justify-content:space-between;align-items:center;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
-    ftrEl.innerHTML = `<span style="font-size:11px;color:#666;font-weight:700">송유근 영어</span><span style="font-size:11px;color:#666;font-weight:600">최고의 강의 &amp; 철저한 관리</span>`;
+    ftrEl.innerHTML = `<span style="font-size:12.5px;color:#444;font-weight:700;letter-spacing:-.1px">송유근 영어</span><span style="font-size:12.5px;color:#444;font-weight:600;letter-spacing:-.1px">최고의 강의 &amp; 철저한 관리</span>`;
     const ftrImg = await captureNode(ftrEl);
 
     const totalPages = pdf.internal.getNumberOfPages();
