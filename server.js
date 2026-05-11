@@ -121,24 +121,41 @@ function resolveClaudeBin() {
 async function callClaudeViaApi({ model, system, userMessage }) {
   const apiKey = process.env.CLAUDE_API_KEY;
   if (!apiKey) throw new Error('CLAUDE_API_KEY not configured');
+
+  // 1시간 prompt caching — system prompt 가 일정 길이 이상일 때 cache_control 적용
+  // (Anthropic 캐시 최소: 1024 토큰. 그 미만은 캐싱 자체가 거부됨)
+  const systemText = String(system || '');
+  const useExtendedCache = systemText.length >= 3000; // 대략 1000 토큰 = 4000자 안전 기준
+  const systemPayload = useExtendedCache
+    ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral', ttl: '1h' } }]
+    : systemText;
+
   const body = {
     model: model || 'claude-sonnet-4-5',
     max_tokens: 8192,
-    system: system || '',
+    system: systemPayload,
     messages: [{ role: 'user', content: userMessage }]
   };
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01'
+  };
+  if (useExtendedCache) headers['anthropic-beta'] = 'extended-cache-ttl-2025-04-11';
+
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
+    headers,
     body: JSON.stringify(body)
   });
   const data = await r.json();
   if (!r.ok) throw new Error(data.error?.message || 'Claude API error');
-  return { text: data.content?.[0]?.text || '', usage: data.usage || null, source: 'api-key' };
+  return {
+    text: data.content?.[0]?.text || '',
+    usage: data.usage || null,
+    source: 'api-key',
+    cacheUsed: useExtendedCache ? '1h-ephemeral' : 'none'
+  };
 }
 
 function callClaudeViaCli({ model, system, userMessage }) {
@@ -253,22 +270,32 @@ async function handleClaudePdf(req, res) {
   }
 
   try {
+    // PDF 자체에 cache_control 적용 — PDF 가 크니 캐시 효과 최대 (1h)
+    // 같은 PDF 를 여러 청크로 분할 호출 시 두 번째 청크부터 90% 할인
+    const systemText = String(system || '');
+    const useSystemCache = systemText.length >= 3000;
+    const systemPayload = useSystemCache
+      ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral', ttl: '1h' } }]
+      : systemText;
+
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'pdfs-2024-09-25'
+        // pdfs + 1h cache 동시 활성
+        'anthropic-beta': 'pdfs-2024-09-25,extended-cache-ttl-2025-04-11'
       },
       body: JSON.stringify({
         model: model || 'claude-sonnet-4-5',
         max_tokens: 16000,
-        system: system || '',
+        system: systemPayload,
         messages: [{
           role: 'user',
           content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+            // PDF 에 1h ephemeral 캐시 — 청크별 호출 시 큰 비용 절감
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 }, cache_control: { type: 'ephemeral', ttl: '1h' } },
             { type: 'text', text: userMessage }
           ]
         }]
@@ -276,7 +303,7 @@ async function handleClaudePdf(req, res) {
     });
     const data = await r.json();
     if (!r.ok) return sendJson(res, r.status, { error: data.error?.message || 'Claude PDF API error' });
-    sendJson(res, 200, { text: data.content?.[0]?.text || '', usage: data.usage || null });
+    sendJson(res, 200, { text: data.content?.[0]?.text || '', usage: data.usage || null, cacheUsed: '1h-ephemeral' });
   } catch (e) {
     console.error('[api/claude-pdf] error:', e.message);
     sendJson(res, 500, { error: e.message });
