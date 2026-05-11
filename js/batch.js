@@ -413,23 +413,35 @@ async function buildBatchPdf(job) {
       // DOM 업데이트 대기
       await new Promise(r => requestAnimationFrame(r));
 
-      // (큰 메타 헤더 블록 제거 — 모든 페이지 머릿말이 책·단원·지문번호 동일 표시)
+      // 3) 섹션 이미지 캡처 — 새 양식 (지문 번호/제목 + 부제목)
+      const PASSAGE_HEADER_BLUE = '#4f6ef7';
+      const makeSubtitle = (text) => {
+        const el = document.createElement('div');
+        el.style.cssText = `font-size:18px;font-weight:800;color:#1a1a1a;letter-spacing:-.4px;padding:4px 0 12px;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+        el.textContent = text;
+        return el;
+      };
+      const escTxt = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const makePassageHeader = (numText, titleKo) => {
+        const el = document.createElement('div');
+        el.style.cssText = `display:flex;align-items:baseline;gap:14px;padding:6px 0 16px;border-bottom:1px solid #ebebeb;margin-bottom:16px;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+        el.innerHTML =
+          `<span style="font-size:26px;font-weight:800;color:${PASSAGE_HEADER_BLUE};letter-spacing:-.5px;flex-shrink:0">${escTxt(numText)}</span>` +
+          (titleKo ? `<span style="font-size:17px;font-weight:700;color:#1a1a1a;letter-spacing:-.3px;line-height:1.3">${escTxt(titleKo)}</span>` : '');
+        return el;
+      };
+      const passageNumText = item.num ? (String(item.num).match(/\d+/) ? String(item.num).match(/\d+/)[0] + '번' : String(item.num)) : '';
+      const passageTitleKo = (result && result.logic && result.logic.titleKo) || '';
 
-      // 3) 섹션 이미지 캡처 — 어휘는 행 단위 분할 캡처 (단어 단위 page break)
+      // 어휘: 지문 번호/제목 + "핵심단어" + 행 단위
+      let passageHeaderImg = null;
       let vocabHeaderImg = null;
       const vocabRowImgs = [];
       if (document.getElementById('vocabCard').style.display !== 'none') {
-        const hdrWrap = document.createElement('div');
-        hdrWrap.style.cssText = 'padding:0;background:#fff';
-        const tagT3 = document.querySelector('#vocabCard .tag.t3');
-        if (tagT3) hdrWrap.appendChild(tagT3.cloneNode(true));
-        const secTitle = document.querySelector('#vocabContent .vocab-section-title');
-        if (secTitle) {
-          const sc = secTitle.cloneNode(true);
-          sc.style.marginTop = '8px';
-          hdrWrap.appendChild(sc);
+        if (passageNumText || passageTitleKo) {
+          passageHeaderImg = await captureNode(makePassageHeader(passageNumText, passageTitleKo));
         }
-        vocabHeaderImg = await captureNode(hdrWrap);
+        vocabHeaderImg = await captureNode(makeSubtitle('핵심단어'));
 
         const cells = Array.from(document.querySelectorAll('#vocabContent .vocab-grid .vcell'));
         for (let i = 0; i < cells.length; i += 2) {
@@ -441,42 +453,35 @@ async function buildBatchPdf(job) {
         }
       }
 
-      // Logic Flow 서브섹션 분할 캡처
-      let logicFlowHeaderImg = null;
-      const logicSubImgs = [];
-      if (document.getElementById('logicFlowCard').style.display !== 'none') {
-        const lfTag = document.querySelector('#logicFlowCard .tag.t1');
-        if (lfTag) logicFlowHeaderImg = await captureNode(lfTag.cloneNode(true));
-        const subs = Array.from(document.querySelectorAll('#logicFlowContent .lf-sub'));
-        for (let si = 0; si < subs.length; si++) {
-          const img = await captureNode(subs[si].cloneNode(true));
-          // 원문분석 제거됨 — 인덱스 [0]첫문장해석, [1]Logic Flow, [2]구조요약
-          img._group = (si === 0 || si === 1) ? 'flow' : null;
-          logicSubImgs.push(img);
-        }
-      }
-
-      // 어법 헤더 + 문장 개별 캡처
+      // 어법: "어법분석" 부제목 + 범례 + 문장
       let grammarHeaderImg = null;
       const sentenceImgs = [];
       if (document.getElementById('grammarCard').style.display !== 'none' &&
           document.querySelectorAll('#g0 .gm-sentence').length) {
         const gHeader = document.createElement('div');
         gHeader.style.cssText = 'padding:0';
-        const origTag = document.querySelector('#panel-grammar .tag.t4');
+        gHeader.appendChild(makeSubtitle('어법분석'));
         const origLegend = document.querySelector('#panel-grammar .gr-legend')
           || document.querySelector('#panel-grammar .gm-legend');
-        if (origTag) {
-          const tagClone = origTag.cloneNode(true);
-          tagClone.style.marginBottom = '10px';
-          gHeader.appendChild(tagClone);
-        }
         if (origLegend) gHeader.appendChild(origLegend.cloneNode(true));
         grammarHeaderImg = await captureNode(gHeader);
 
         const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence'));
         for (const sent of sentences) {
           sentenceImgs.push(await captureNode(sent.cloneNode(true)));
+        }
+      }
+
+      // Logic Flow → "구조분석" 부제목 + 서브섹션
+      let logicFlowHeaderImg = null;
+      const logicSubImgs = [];
+      if (document.getElementById('logicFlowCard').style.display !== 'none') {
+        logicFlowHeaderImg = await captureNode(makeSubtitle('구조분석'));
+        const subs = Array.from(document.querySelectorAll('#logicFlowContent .lf-sub'));
+        for (let si = 0; si < subs.length; si++) {
+          const img = await captureNode(subs[si].cloneNode(true));
+          img._group = (si === 0 || si === 1) ? 'flow' : null;
+          logicSubImgs.push(img);
         }
       }
 
@@ -504,8 +509,9 @@ async function buildBatchPdf(job) {
         }
       };
 
-      // 1) 어휘: 헤더 + 행 단위 분할
-      if (vocabHeaderImg) placeInFlow(vocabHeaderImg);
+      // 1) 첫 페이지 — 지문 번호/제목 + "핵심단어" 부제목 + 행 단위
+      if (passageHeaderImg) placeInFlow(passageHeaderImg);
+      if (vocabHeaderImg)   placeInFlow(vocabHeaderImg);
       for (const rowImg of vocabRowImgs) {
         if (rowImg.heightMm <= usableH && y + rowImg.heightMm > bottomLimit) {
           pdf.addPage();
@@ -557,22 +563,29 @@ async function buildBatchPdf(job) {
     }
 
     // ── 머릿말 + 꼬릿말 (지문별 다른 서브헤더 적용) ──
-    // 꼬릿말은 모든 페이지에 공통
+    const HEADER_BLUE = '#4f6ef7';
+
+    // 꼬릿말 — 상단 파란 구분선
     const ftrEl = document.createElement('div');
-    ftrEl.style.cssText = `width:${captureWidth}px;padding:6px 0 0;border-top:2px solid #bbb;display:flex;justify-content:space-between;align-items:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+    ftrEl.style.cssText = `width:${captureWidth}px;padding:8px 0 0;border-top:2.5px solid ${HEADER_BLUE};display:flex;justify-content:space-between;align-items:center;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
     ftrEl.innerHTML = `<span style="font-size:11px;color:#666;font-weight:700">송유근 영어</span><span style="font-size:11px;color:#666;font-weight:600">최고의 강의 &amp; 철저한 관리</span>`;
     const ftrImg = await captureNode(ftrEl);
 
-    // 지문별 서브헤더 캐시
+    // 지문별 머릿말 — 좌측 "상세분석" + 우측 "교재명 | 단원명", 파란 구분선
     const subHdrByRange = [];
     for (const range of passagePageRanges) {
       const subHdrEl = document.createElement('div');
-      subHdrEl.style.cssText = `width:${captureWidth}px;padding:3px 0 6px;border-bottom:2px solid #bbb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
-      const parts = ['꼼꼼분석'];
-      if (range.bookLabel) parts.push(range.bookLabel);
-      if (range.unitVal) parts.push(range.unitVal);
-      if (range.numVal) parts.push(range.numVal);
-      subHdrEl.innerHTML = `<span style="font-size:13px;color:#555;font-weight:700;letter-spacing:0.02em">${parts.map(t => `<span>${t}</span>`).join('<span style="color:#aaa;margin:0 8px">·</span>')}</span>`;
+      subHdrEl.style.cssText = `width:${captureWidth}px;padding:4px 0 8px;border-bottom:2.5px solid ${HEADER_BLUE};display:flex;justify-content:space-between;align-items:baseline;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+      const rightParts = [];
+      if (range.bookLabel) rightParts.push(range.bookLabel);
+      const unitNumParts = [];
+      if (range.unitVal) unitNumParts.push(range.unitVal);
+      if (range.numVal) unitNumParts.push(range.numVal);
+      if (unitNumParts.length) rightParts.push(unitNumParts.join(' '));
+      const rightStr = rightParts.join('  |  ');
+      subHdrEl.innerHTML =
+        `<span style="font-size:15px;color:${HEADER_BLUE};font-weight:800;letter-spacing:-.3px">상세분석</span>` +
+        `<span style="font-size:12.5px;color:#444;font-weight:600;letter-spacing:-.1px">${rightStr}</span>`;
       const subHdrImg = await captureNode(subHdrEl);
       subHdrByRange.push({ range, subHdrImg });
     }

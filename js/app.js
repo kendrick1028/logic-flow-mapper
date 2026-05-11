@@ -1572,25 +1572,46 @@ async function downloadDetailPDF(ev) {
     // (메타 헤더 큰 블록은 제거 — 모든 페이지의 머릿말이 동일하게 책·단원·지문번호 표시)
     // 1페이지에도 동일 머릿말이 적용되어 빈 공간 없이 어휘부터 시작.
 
-    // ── 섹션 이미지 캡처 ── (메타·지문구조 카드는 새 양식에서 제거됨)
-    // 어휘: 카드 헤더(섹션 타이틀) + tag.t3 + 그리드 행 단위(2 셀씩) 분할 캡처 → page break 가능
+    // ── 섹션 이미지 캡처 — 새 양식 ──
+    // 부제목 div 만드는 헬퍼 (핵심단어 / 어법분석 / 구조분석)
+    const makeSubtitle = (text) => {
+      const el = document.createElement('div');
+      el.style.cssText = `font-size:18px;font-weight:800;color:#1a1a1a;letter-spacing:-.4px;padding:4px 0 12px;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+      el.textContent = text;
+      return el;
+    };
+
+    // 지문 번호 + 제목 큰 헤더 (첫 페이지 vocab 위)
+    // 색상: 번호=파란색 큰 글씨, 제목=검정 일반
+    const PASSAGE_HEADER_BLUE = '#4f6ef7';
+    const makePassageHeader = (numText, titleKo) => {
+      const el = document.createElement('div');
+      el.style.cssText = `display:flex;align-items:baseline;gap:14px;padding:6px 0 16px;border-bottom:1px solid #ebebeb;margin-bottom:16px;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+      el.innerHTML =
+        `<span style="font-size:26px;font-weight:800;color:${PASSAGE_HEADER_BLUE};letter-spacing:-.5px;flex-shrink:0">${esc(numText)}</span>` +
+        (titleKo ? `<span style="font-size:17px;font-weight:700;color:#1a1a1a;letter-spacing:-.3px;line-height:1.3">${esc(titleKo)}</span>` : '');
+      return el;
+    };
+
+    // 지문 번호 / 제목 결정
+    const passageNumText = isManual
+      ? '직접 입력'
+      : (selNumVal ? (String(selNumVal).match(/\d+/) ? String(selNumVal).match(/\d+/)[0] + '번' : selNumVal) : '');
+    const passageTitleKo = (lastDetailResult && lastDetailResult.logic && lastDetailResult.logic.titleKo) || '';
+
+    // 어휘: 지문 번호/제목 헤더 + "핵심단어" 부제목 + 행 단위 셀
+    let passageHeaderImg = null;
     let vocabHeaderImg = null;
     const vocabRowImgs = [];
     if (document.getElementById('vocabCard').style.display !== 'none') {
-      // 헤더 (tag + section-title) 통합 캡처
-      const hdrWrap = document.createElement('div');
-      hdrWrap.style.cssText = 'padding:0;background:#fff';
-      const tagT3 = document.querySelector('#vocabCard .tag.t3');
-      if (tagT3) hdrWrap.appendChild(tagT3.cloneNode(true));
-      const secTitle = document.querySelector('#vocabContent .vocab-section-title');
-      if (secTitle) {
-        const sc = secTitle.cloneNode(true);
-        sc.style.marginTop = '8px';
-        hdrWrap.appendChild(sc);
+      // (1) 지문 번호 + 제목 (이 PDF 의 첫 페이지 vocab 위에만 표시)
+      if (passageNumText || passageTitleKo) {
+        passageHeaderImg = await captureNode(makePassageHeader(passageNumText, passageTitleKo));
       }
-      vocabHeaderImg = await captureNode(hdrWrap);
+      // (2) 핵심단어 부제목
+      vocabHeaderImg = await captureNode(makeSubtitle('핵심단어'));
 
-      // 셀들을 2개씩 묶어 row 단위 캡처
+      // (3) 셀 2개씩 행 단위 캡처
       const cells = Array.from(document.querySelectorAll('#vocabContent .vocab-grid .vcell'));
       for (let i = 0; i < cells.length; i += 2) {
         const row = document.createElement('div');
@@ -1601,44 +1622,36 @@ async function downloadDetailPDF(ev) {
       }
     }
 
-    // Logic Flow: 서브섹션별 개별 캡처 (폭맞춤)
-    // lf-sub 순서 (원문분석 제거됨): [0]첫문장해석, [1]Logic Flow, [2]구조요약
-    let logicFlowHeaderImg = null;
-    const logicSubImgs = []; // { img, group }
-    if (document.getElementById('logicFlowCard').style.display !== 'none') {
-      const lfTag = document.querySelector('#logicFlowCard .tag.t1');
-      if (lfTag) logicFlowHeaderImg = await captureNode(lfTag.cloneNode(true));
-      const subs = Array.from(document.querySelectorAll('#logicFlowContent .lf-sub'));
-      for (let si = 0; si < subs.length; si++) {
-        const img = await captureNode(subs[si].cloneNode(true));
-        // group: 첫문장해석(0)과 Logic Flow(1)를 같은 그룹으로 묶음 (붙어서 한 페이지에)
-        img._group = (si === 0 || si === 1) ? 'flow' : null;
-        logicSubImgs.push(img);
-      }
-    }
-
-    // 어법 섹션: 헤더(tag + legend) + 문장들 개별 캡처
+    // 어법: "어법분석" 부제목 + 범례 + 문장들
     let grammarHeaderImg = null;
     const sentenceImgs = [];
     if (document.getElementById('grammarCard').style.display !== 'none' &&
         document.querySelectorAll('#g0 .gm-sentence').length) {
       const gHeader = document.createElement('div');
       gHeader.style.cssText = 'padding:0';
-      const origTag = document.querySelector('#panel-grammar .tag.t4');
-      // 신구 양립: gm-legend (구) / gr-legend (신)
+      gHeader.appendChild(makeSubtitle('어법분석'));
       const origLegend = document.querySelector('#panel-grammar .gr-legend')
         || document.querySelector('#panel-grammar .gm-legend');
-      if (origTag) {
-        const tagClone = origTag.cloneNode(true);
-        tagClone.style.marginBottom = '10px';
-        gHeader.appendChild(tagClone);
-      }
       if (origLegend) gHeader.appendChild(origLegend.cloneNode(true));
       grammarHeaderImg = await captureNode(gHeader);
 
       const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence'));
       for (const sent of sentences) {
         sentenceImgs.push(await captureNode(sent.cloneNode(true)));
+      }
+    }
+
+    // Logic Flow → 구조분석: 부제목 + 서브섹션
+    let logicFlowHeaderImg = null;
+    const logicSubImgs = [];
+    if (document.getElementById('logicFlowCard').style.display !== 'none') {
+      logicFlowHeaderImg = await captureNode(makeSubtitle('구조분석'));
+      const subs = Array.from(document.querySelectorAll('#logicFlowContent .lf-sub'));
+      for (let si = 0; si < subs.length; si++) {
+        const img = await captureNode(subs[si].cloneNode(true));
+        // group: 첫문장해석(0)과 Logic Flow(1)를 같은 그룹으로 묶음
+        img._group = (si === 0 || si === 1) ? 'flow' : null;
+        logicSubImgs.push(img);
       }
     }
 
@@ -1667,8 +1680,9 @@ async function downloadDetailPDF(ev) {
       }
     };
 
-    // 1) 어휘: 헤더 + 행 단위 분할 배치 (단어 단위 page break)
-    if (vocabHeaderImg) placeInFlow(vocabHeaderImg);
+    // 1) 첫 페이지 — 지문 번호/제목 헤더 + "핵심단어" 부제목 + 행 단위 분할
+    if (passageHeaderImg) placeInFlow(passageHeaderImg);
+    if (vocabHeaderImg)   placeInFlow(vocabHeaderImg);
     for (const rowImg of vocabRowImgs) {
       if (rowImg.heightMm <= usableH && y + rowImg.heightMm > bottomLimit) {
         pdf.addPage();
@@ -1710,21 +1724,27 @@ async function downloadDetailPDF(ev) {
     }
 
     // ── 머릿말 + 꼬릿말 (모든 페이지) ──
-    // 서브페이지 머릿말 이미지 캡처 (한 번만)
+    // 머릿말 — 좌측 "상세분석" + 우측 "교재명 | 단원명", 하단 파란 구분선
+    const HEADER_BLUE = '#4f6ef7';
     const subHdrEl = document.createElement('div');
-    subHdrEl.style.cssText = `width:${captureWidth}px;padding:3px 0 6px;border-bottom:2px solid #bbb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
-    let subHdrParts = ['꼼꼼분석'];
+    subHdrEl.style.cssText = `width:${captureWidth}px;padding:4px 0 8px;border-bottom:2.5px solid ${HEADER_BLUE};display:flex;justify-content:space-between;align-items:baseline;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+    let rightParts = [];
     if (!isManual) {
-      if (bookLabel) subHdrParts.push(bookLabel);
-      if (selUnitVal) subHdrParts.push(selUnitVal);
-      if (selNumVal) subHdrParts.push(selNumVal);
+      if (bookLabel) rightParts.push(bookLabel);
+      const unitParts = [];
+      if (selUnitVal) unitParts.push(selUnitVal);
+      if (selNumVal) unitParts.push(selNumVal);
+      if (unitParts.length) rightParts.push(unitParts.join(' '));
     }
-    subHdrEl.innerHTML = `<span style="font-size:13px;color:#555;font-weight:700;letter-spacing:0.02em">${subHdrParts.map(t => `<span>${t}</span>`).join('<span style="color:#aaa;margin:0 8px">·</span>')}</span>`;
+    const rightStr = rightParts.join('  |  ');
+    subHdrEl.innerHTML =
+      `<span style="font-size:15px;color:${HEADER_BLUE};font-weight:800;letter-spacing:-.3px">상세분석</span>` +
+      `<span style="font-size:12.5px;color:#444;font-weight:600;letter-spacing:-.1px">${rightStr || '직접 입력 지문'}</span>`;
     const subHdrImg = await captureNode(subHdrEl);
 
-    // 꼬릿말 이미지 캡처 (한 번만 — 페이지 번호 제외)
+    // 꼬릿말 — 상단 파란 구분선
     const ftrEl = document.createElement('div');
-    ftrEl.style.cssText = `width:${captureWidth}px;padding:6px 0 0;border-top:2px solid #bbb;display:flex;justify-content:space-between;align-items:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+    ftrEl.style.cssText = `width:${captureWidth}px;padding:8px 0 0;border-top:2.5px solid ${HEADER_BLUE};display:flex;justify-content:space-between;align-items:center;font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','나눔고딕',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
     ftrEl.innerHTML = `<span style="font-size:11px;color:#666;font-weight:700">송유근 영어</span><span style="font-size:11px;color:#666;font-weight:600">최고의 강의 &amp; 철저한 관리</span>`;
     const ftrImg = await captureNode(ftrEl);
 

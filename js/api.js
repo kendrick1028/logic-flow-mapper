@@ -6,6 +6,7 @@ const SYSTEM_PROMPT = `당신은 내신 영어 시험 대비에 특화된 최고
 
 응답 형식:
 {
+  "titleKo": "지문 내용을 한 줄로 요약한 한국어 제목 (15자 이내, 명사구로)",
   "firstSentenceEn": "영어 원문 첫 문장 그대로",
   "firstSentence": "첫 문장의 자연스러운 한국어 해석",
   "sentences": [
