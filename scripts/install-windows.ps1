@@ -13,15 +13,15 @@
 $ErrorActionPreference = 'Continue'   # 일부 단계 실패해도 계속 진행
 $ProgressPreference = 'SilentlyContinue'
 
-# 어떤 에러가 나든 창이 자동으로 닫히지 않도록 마지막에 항상 키 입력 대기
-trap {
+# 안전 종료 헬퍼 — 어떤 에러가 나도 창을 닫지 않고 사용자가 메시지 볼 수 있게
+function Stop-Safe([string]$msg) {
   Write-Host ""
-  Write-Host "❌ 오류 발생:" -ForegroundColor Red
-  Write-Host $_ -ForegroundColor Yellow
+  Write-Host "❌ $msg" -ForegroundColor Red
   Write-Host ""
-  Write-Host "이 창은 자동으로 닫히지 않습니다. 위 에러를 캡처해서 보내주세요."
+  Write-Host "이 창은 자동으로 닫히지 않습니다. 위 메시지를 캡처해서 보내주세요."
   Read-Host "Enter 를 누르면 창이 닫힙니다"
-  break
+  # 스크립트만 종료, 셸은 유지 (irm|iex 환경 + Start-Process 환경 모두 안전)
+  $global:LFM_STOP = $true
 }
 
 # ── 설정 (필요 시 사용자 수정) ─────────────────────────────────
@@ -43,19 +43,27 @@ function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
 function Refresh-Path {
   $machinePath = [Environment]::GetEnvironmentVariable("Path","Machine")
   $userPath    = [Environment]::GetEnvironmentVariable("Path","User")
-  $env:Path = "$machinePath;$userPath"
-  # npm global prefix 도 명시적으로 추가 (npm install -g 직후 PATH 미반영 대응)
+  # 새로 설치된 도구 경로를 강제로 PATH 에 추가 — winget/npm 직후 PATH 미반영 대응
+  $forced = @(
+    "$env:ProgramFiles\nodejs",
+    "${env:ProgramFiles(x86)}\nodejs",
+    "$env:ProgramFiles\Git\cmd",
+    "$env:ProgramFiles\Git\bin",
+    "${env:ProgramFiles(x86)}\Git\cmd",
+    "${env:ProgramFiles(x86)}\Git\bin",
+    "$env:APPDATA\npm"
+  ) | Where-Object { Test-Path $_ }
+  $env:Path = "$machinePath;$userPath;" + ($forced -join ';')
+  # npm config prefix (있으면 추가)
   try {
-    $npmPrefix = (npm config get prefix 2>$null).Trim()
-    if ($npmPrefix -and ($env:Path -notlike "*$npmPrefix*")) {
-      $env:Path = "$env:Path;$npmPrefix"
+    $cmd = Get-Command npm -ErrorAction SilentlyContinue
+    if ($cmd) {
+      $npmPrefix = (& npm config get prefix 2>$null | Out-String).Trim()
+      if ($npmPrefix -and (Test-Path $npmPrefix) -and ($env:Path -notlike "*$npmPrefix*")) {
+        $env:Path = "$env:Path;$npmPrefix"
+      }
     }
   } catch {}
-  # 표준 npm global 경로 fallback 추가
-  $defaultNpm = "$env:APPDATA\npm"
-  if ((Test-Path $defaultNpm) -and ($env:Path -notlike "*$defaultNpm*")) {
-    $env:Path = "$env:Path;$defaultNpm"
-  }
 }
 
 function Has-Cmd($name) {
