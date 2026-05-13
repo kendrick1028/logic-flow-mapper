@@ -995,8 +995,9 @@ async function loadSavedAnalysis() {
     });
 
     // 렌더링 — 메타·지문구조는 더 이상 표시 안 함
+    const loadedPassage = getSelectedPassage() || '';
     if (data.logic) {
-      renderLogicFlowInDetail(data.logic, getSelectedPassage() || '');
+      renderLogicFlowInDetail(data.logic, loadedPassage);
       document.getElementById('logicFlowCard').style.display = '';
     }
     if (data.vocab) {
@@ -1004,10 +1005,15 @@ async function loadSavedAnalysis() {
       document.getElementById('vocabCard').style.display = '';
     }
     if (data.grammar) {
-      renderGrammar(data.grammar);
+      // 저장된 sentence 수 < 원본 문장 수 → 빠진 ID 자리에 _error 스텁 채워 재시도 가능하게
+      const grammarWithGaps = reconstructMissingSentences(data.grammar, loadedPassage);
+      renderGrammar(grammarWithGaps);
       document.getElementById('grammarCard').style.display = '';
+      // lastDetailResult 도 보강된 버전으로
+      lastDetailResult = { logic: data.logic, vocab: data.vocab, grammar: grammarWithGaps };
+    } else {
+      lastDetailResult = { logic: data.logic, vocab: data.vocab, grammar: null };
     }
-    lastDetailResult = { logic: data.logic, vocab: data.vocab, grammar: data.grammar };
     result.classList.add('show');
     // 이미 저장된 결과 → PDF만 표시, 저장 버튼 숨김
     const actions = document.getElementById('grammarActions');
@@ -1019,6 +1025,58 @@ async function loadSavedAnalysis() {
     loadBtn.textContent = '기존 분석 가져오기';
     loadBtn.disabled = false;
   }
+}
+
+// 로드 시 빠진 문장 ID 재구성 — 저장된 sentences 와 원문 비교
+// passage 원문을 splitIntoSentences 로 쪼개서 빠진 ID 자리에 _error 스텁 삽입.
+// → 재시도 버튼이 작동할 수 있게 text 필드 확보.
+function reconstructMissingSentences(grammarObj, originalPassage) {
+  if (!grammarObj || !Array.isArray(grammarObj.sentences)) {
+    return grammarObj || { sentences: [] };
+  }
+  const saved = grammarObj.sentences.slice();
+  const expected = (typeof splitIntoSentences === 'function' && originalPassage)
+    ? splitIntoSentences(originalPassage)
+    : [];
+  if (!expected.length) return grammarObj;
+  const expectedCount = grammarObj.totalSentenceCount || expected.length;
+  if (saved.length >= expectedCount) return grammarObj;
+
+  const present = new Set(saved.map(s => s && s.id));
+  const stubs = [];
+  for (let i = 1; i <= expectedCount; i++) {
+    if (!present.has(i)) {
+      stubs.push({
+        id: i,
+        text: expected[i - 1] || '',
+        translation: '',
+        annotations: [],
+        specialPatterns: [],
+        _error: 'not_analyzed'   // 마커 — UI 에서 재시도 버튼 표시. PDF 에선 스킵.
+      });
+    }
+  }
+  const merged = saved.concat(stubs).sort((a, b) => (a.id || 0) - (b.id || 0));
+  return { ...grammarObj, sentences: merged };
+}
+
+// 저장용 grammar 정제 — _error 문장 제외 + totalSentenceCount 메타데이터 추가
+// 로드 시 빠진 문장 ID 를 감지해서 재시도 UI 제공 가능
+function sanitizeGrammarForSave(grammarObj) {
+  if (!grammarObj || !Array.isArray(grammarObj.sentences)) return grammarObj || null;
+  const total = grammarObj.sentences.length;
+  const clean = grammarObj.sentences
+    .filter(s => s && !s._error && Array.isArray(s.annotations))
+    .map(s => {
+      // _error / 임시 필드 제거
+      const { _error, ...rest } = s;
+      return rest;
+    });
+  return {
+    ...grammarObj,
+    sentences: clean,
+    totalSentenceCount: total   // 원본 기대 문장 수 (로드 시 누락 감지용)
+  };
 }
 
 async function saveDetailAnalysis() {
@@ -1040,7 +1098,7 @@ async function saveDetailAnalysis() {
       // meta 필드 제거됨 (메타·지문구조 카드 단순화로 미사용)
       logic: lastDetailResult.logic || null,
       vocab: lastDetailResult.vocab || null,
-      grammar: lastDetailResult.grammar || null,
+      grammar: sanitizeGrammarForSave(lastDetailResult.grammar),
       schemaVersion: 2,
       savedAt: firebase.firestore.FieldValue.serverTimestamp(),
       savedBy: currentUser ? currentUser.uid : null
@@ -1399,12 +1457,12 @@ function renderGrammar(data) {
   if (!g0) return;
   let h = '';
 
-  // 실패한 문장 개수 — 상단 "전체 재시도" 버튼
+  // 미분석 문장 개수 — 상단 배너 (조용한 안내)
   const failedCount = sentences.filter(s => s && s._error).length;
   if (failedCount > 0) {
     h += `<div class="gm-retry-banner">
-      <span>⚠ 분석 실패한 문장 <b>${failedCount}개</b> 있습니다.</span>
-      <button class="gm-retry-all-btn" onclick="retryAllFailedGrammar()">🔄 모두 다시 분석</button>
+      <span>미분석 문장 <b>${failedCount}개</b></span>
+      <button class="gm-retry-all-btn" onclick="retryAllFailedGrammar()">분석 실행</button>
     </div>`;
   }
 
@@ -1412,14 +1470,17 @@ function renderGrammar(data) {
     if (!s) return;
     const errMode = !!s._error;
     h += `<div class="gm-sentence${errMode ? ' gm-sentence-error' : ''}" data-sid="${s.id}" data-text="${esc(s.text || '')}">`;
-    // 문장 헤더: 번호 + (실패시) 재시도 버튼
+    // 문장 헤더: 번호 + (미분석시) 분석 버튼
     const sp = Array.isArray(s.specialPatterns) ? s.specialPatterns : [];
     h += `<div class="gm-sent-header">
       <span class="gm-sent-num">${s.id}</span>
-      ${errMode ? `<button class="gm-retry-btn" onclick="retryGrammarSentence(${s.id})" title="이 문장만 다시 분석">🔄 다시 분석</button>` : ''}
+      ${errMode ? `<button class="gm-retry-btn" onclick="retryGrammarSentence(${s.id})" title="이 문장 분석하기">분석</button>` : ''}
     </div>`;
+    // 미분석 문장 — 원문만 회색으로 표시 (실패 메시지 X)
     if (errMode) {
-      h += `<div class="gm-error-note">⚠ 분석 실패: ${esc(s._error)} — 위 버튼으로 재시도</div>`;
+      h += `<div class="gm-sent-text gm-token-line" style="color:#999">${esc(s.text || '')}</div>`;
+      h += `</div>`;
+      return;
     }
 
     // 어법 라인 — annotations 우선, 구 tokens 폴백, 그 외엔 원문 그대로
@@ -1552,8 +1613,10 @@ async function retryAllFailedGrammar() {
   else alert(`재분석 — 성공 ${success} · 실패 ${fail}`);
 }
 
-// Firestore 의 grammar.sentences 배열 안 특정 문장만 업데이트
+// Firestore 의 grammar.sentences 배열 안 특정 문장만 업데이트 (성공한 경우만 저장)
 async function persistGrammarUpdate(sentenceId, newSentence) {
+  // 새 문장도 _error 면 저장 건너뛰기
+  if (newSentence && newSentence._error) return;
   try {
     const u = document.getElementById('selUnit')?.value;
     const n = document.getElementById('selNum')?.value;
@@ -1566,8 +1629,10 @@ async function persistGrammarUpdate(sentenceId, newSentence) {
     const data = snap.data();
     const sentences = (data.grammar && data.grammar.sentences) || [];
     const idx = sentences.findIndex(s => s && s.id === sentenceId);
-    if (idx >= 0) sentences[idx] = newSentence;
-    else sentences.push(newSentence);
+    // _error 제거된 문장만 저장
+    const { _error, ...cleanSent } = newSentence;
+    if (idx >= 0) sentences[idx] = cleanSent;
+    else sentences.push(cleanSent);
     await ref.update({
       'grammar.sentences': sentences,
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1748,7 +1813,8 @@ async function downloadDetailPDF(ev) {
       if (origLegend) gHeader.appendChild(origLegend.cloneNode(true));
       grammarHeaderImg = await captureNode(gHeader);
 
-      const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence'));
+      // PDF 는 분석 실패/미분석 문장 제외 — 에러 표시 절대 X
+      const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence:not(.gm-sentence-error)'));
       for (const sent of sentences) {
         sentenceImgs.push(await captureNode(sent.cloneNode(true)));
       }

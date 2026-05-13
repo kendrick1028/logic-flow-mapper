@@ -466,7 +466,8 @@ async function buildBatchPdf(job) {
         if (origLegend) gHeader.appendChild(origLegend.cloneNode(true));
         grammarHeaderImg = await captureNode(gHeader);
 
-        const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence'));
+        // PDF 는 분석 실패/미분석 문장 제외
+        const sentences = Array.from(document.querySelectorAll('#g0 .gm-sentence:not(.gm-sentence-error)'));
         for (const sent of sentences) {
           sentenceImgs.push(await captureNode(sent.cloneNode(true)));
         }
@@ -626,6 +627,23 @@ async function buildBatchPdf(job) {
   };
 }
 
+// 저장용 grammar 정제 — _error 문장 제외 + 전체 문장 수 메타 저장
+function _sanitizeGrammarForSave(grammarObj) {
+  if (!grammarObj || !Array.isArray(grammarObj.sentences)) return grammarObj || null;
+  const total = grammarObj.sentences.length;
+  const clean = grammarObj.sentences
+    .filter(s => s && !s._error && Array.isArray(s.annotations))
+    .map(s => {
+      const { _error, ...rest } = s;
+      return rest;
+    });
+  return {
+    ...grammarObj,
+    sentences: clean,
+    totalSentenceCount: total
+  };
+}
+
 async function saveBatchResult(item, result) {
   const docId = `${item.book}__${item.unit}__${item.num}`;
   await db.collection('analyses').doc(docId).set({
@@ -635,7 +653,7 @@ async function saveBatchResult(item, result) {
     // meta 필드 폐기 (메타·지문구조 카드 단순화로 미사용)
     logic: result.logic || null,
     vocab: result.vocab || null,
-    grammar: result.grammar || null,
+    grammar: _sanitizeGrammarForSave(result.grammar),
     schemaVersion: 2,
     savedAt: firebase.firestore.FieldValue.serverTimestamp(),
     savedBy: typeof currentUser !== 'undefined' && currentUser ? currentUser.uid : null

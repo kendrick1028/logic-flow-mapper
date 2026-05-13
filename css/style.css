@@ -1298,51 +1298,46 @@ sup.gr-omit-tag{
   margin-bottom:14px;
   background:#fff;
 }
+/* 미분석 문장 — 차분한 회색 톤 (에러 표시 없음) */
 #g0 .gm-sentence-error{
-  border-color:#f0b8b8;
-  background:#fff8f7;
+  border-style:dashed;
+  border-color:#d8dde6;
+  background:#fafbfd;
 }
-#g0 .gm-sentence-error .gm-sent-num{ background:#c62828 }
-#g0 .gm-error-note{
-  margin-top:6px;
-  padding:6px 10px;
-  background:#fce8e6;
-  border:1px solid #f5c2bd;
-  border-radius:5px;
-  font-size:11.5px;color:#a93226;
-  font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
-}
+#g0 .gm-sentence-error .gm-sent-num{ background:#9ca3af }
+#g0 .gm-sentence-error .gm-sent-text{ color:#999!important }
+
 .gm-retry-btn{
   margin-left:auto;
-  padding:4px 10px;
-  background:#fff;color:#c62828;
-  border:1.5px solid #c62828;border-radius:6px;
+  padding:4px 12px;
+  background:var(--c-primary);color:#fff;
+  border:none;border-radius:6px;
   font-size:11.5px;font-weight:700;cursor:pointer;
   font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
   transition:background .15s;
 }
-.gm-retry-btn:hover:not(:disabled){background:#c62828;color:#fff}
+.gm-retry-btn:hover:not(:disabled){background:var(--c-primary-dark)}
 .gm-retry-btn:disabled{opacity:.6;cursor:wait}
-.gm-retrying{opacity:.65;pointer-events:none}
+.gm-retrying{opacity:.5;pointer-events:none}
 
 .gm-retry-banner{
   display:flex;justify-content:space-between;align-items:center;gap:12px;
-  padding:11px 14px;
-  background:#fff4e5;border:1px solid #ffd699;
+  padding:10px 14px;
+  background:#eef1fd;border:1px solid #c7d2fe;
   border-radius:8px;margin-bottom:14px;
   font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
-  font-size:12.5px;color:#6c4400;
+  font-size:12.5px;color:#3730a3;
 }
-.gm-retry-banner b{color:#a85800}
+.gm-retry-banner b{color:var(--c-primary-dark);font-weight:800}
 .gm-retry-all-btn{
   padding:6px 14px;
-  background:#e65100;color:#fff;
+  background:var(--c-primary);color:#fff;
   border:none;border-radius:6px;
   font-size:12px;font-weight:700;cursor:pointer;
   font-family:inherit;
   transition:background .15s;
 }
-.gm-retry-all-btn:hover:not(:disabled){background:#bf360c}
+.gm-retry-all-btn:hover:not(:disabled){background:var(--c-primary-dark)}
 .gm-retry-all-btn:disabled{opacity:.6;cursor:wait}
 #g0 .gm-sent-header{
   display:flex;align-items:center;gap:10px;
