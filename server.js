@@ -317,7 +317,8 @@ function checkClaudeAuth() {
       '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '1', 'ok'
     ], { stdio: ['ignore', 'pipe', 'pipe'], shell: IS_WINDOWS });
     let stdoutBuf = '', stderrBuf = '';
-    const timer = setTimeout(() => { proc.kill('SIGKILL'); resolve({ status: 'timeout' }); }, 12_000);
+    // Windows 콜드 스타트가 길어 30초로 확장
+    const timer = setTimeout(() => { proc.kill('SIGKILL'); resolve({ status: 'timeout' }); }, 30_000);
     proc.stdout.on('data', d => { stdoutBuf += d.toString(); });
     proc.stderr.on('data', d => { stderrBuf += d.toString(); });
     proc.on('error', err => {
