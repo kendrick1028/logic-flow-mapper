@@ -13,6 +13,17 @@
 $ErrorActionPreference = 'Continue'   # 일부 단계 실패해도 계속 진행
 $ProgressPreference = 'SilentlyContinue'
 
+# 어떤 에러가 나든 창이 자동으로 닫히지 않도록 마지막에 항상 키 입력 대기
+trap {
+  Write-Host ""
+  Write-Host "❌ 오류 발생:" -ForegroundColor Red
+  Write-Host $_ -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "이 창은 자동으로 닫히지 않습니다. 위 에러를 캡처해서 보내주세요."
+  Read-Host "Enter 를 누르면 창이 닫힙니다"
+  break
+}
+
 # ── 설정 (필요 시 사용자 수정) ─────────────────────────────────
 $RepoUrl    = "https://github.com/kendrick1028/logic-flow-mapper.git"   # GitHub 레포 URL
 $InstallDir = "$env:USERPROFILE\logic-flow-mapper"
@@ -30,11 +41,31 @@ function Write-Warn($msg) { Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
 function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
 
 function Refresh-Path {
-  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+  $machinePath = [Environment]::GetEnvironmentVariable("Path","Machine")
+  $userPath    = [Environment]::GetEnvironmentVariable("Path","User")
+  $env:Path = "$machinePath;$userPath"
+  # npm global prefix 도 명시적으로 추가 (npm install -g 직후 PATH 미반영 대응)
+  try {
+    $npmPrefix = (npm config get prefix 2>$null).Trim()
+    if ($npmPrefix -and ($env:Path -notlike "*$npmPrefix*")) {
+      $env:Path = "$env:Path;$npmPrefix"
+    }
+  } catch {}
+  # 표준 npm global 경로 fallback 추가
+  $defaultNpm = "$env:APPDATA\npm"
+  if ((Test-Path $defaultNpm) -and ($env:Path -notlike "*$defaultNpm*")) {
+    $env:Path = "$env:Path;$defaultNpm"
+  }
 }
 
 function Has-Cmd($name) {
-  return [bool] (Get-Command $name -ErrorAction SilentlyContinue)
+  if (Get-Command $name -ErrorAction SilentlyContinue) { return $true }
+  # .cmd 확장자로도 검사 (Windows npm shim)
+  if (Get-Command "$name.cmd" -ErrorAction SilentlyContinue) { return $true }
+  # 직접 경로 확인
+  $cmdPath = "$env:APPDATA\npm\$name.cmd"
+  if (Test-Path $cmdPath) { return $true }
+  return $false
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -57,11 +88,16 @@ if (Has-Cmd "node") {
     winget install -e --id OpenJS.NodeJS.LTS --silent --accept-source-agreements --accept-package-agreements
     Refresh-Path
     if (Has-Cmd "node") { Write-OK "Node.js 설치 완료" }
-    else { Write-Err "winget 설치 실패. 직접 https://nodejs.org/ko 에서 LTS 버전을 받아 설치하세요." ; exit 1 }
+    else {
+      Write-Err "winget 설치 실패. 직접 https://nodejs.org/ko 에서 LTS 버전을 받아 설치하세요."
+      Read-Host "Enter 를 누르면 창이 닫힙니다"
+      return
+    }
   } else {
     Write-Err "winget 이 없습니다. Windows 10 1809+ 또는 Windows 11 필요."
     Write-Host "  수동 설치: https://nodejs.org/ko 에서 LTS 다운로드 후 설치 → 이 스크립트 재실행"
-    exit 1
+    Read-Host "Enter 를 누르면 창이 닫힙니다"
+    return
   }
 }
 
@@ -74,7 +110,11 @@ if (Has-Cmd "git") {
   winget install -e --id Git.Git --silent --accept-source-agreements --accept-package-agreements
   Refresh-Path
   if (Has-Cmd "git") { Write-OK "Git 설치 완료" }
-  else { Write-Err "Git 설치 실패. https://git-scm.com 에서 직접 설치 후 재시도."; exit 1 }
+  else {
+    Write-Err "Git 설치 실패. https://git-scm.com 에서 직접 설치 후 재시도."
+    Read-Host "Enter 를 누르면 창이 닫힙니다"
+    return
+  }
 }
 
 # ── Step 3: Claude CLI ──────────────────────────────────────
@@ -83,10 +123,32 @@ if (Has-Cmd "claude") {
   Write-OK "Claude CLI 이미 설치됨"
 } else {
   Write-Host "  npm install -g @anthropic-ai/claude-code 실행 중..." -ForegroundColor Gray
-  npm install -g "@anthropic-ai/claude-code"
+  # npm install — 출력 캡처해서 에러 보이게
+  $npmOutput = npm install -g "@anthropic-ai/claude-code" 2>&1
+  $npmExit = $LASTEXITCODE
   Refresh-Path
-  if (Has-Cmd "claude") { Write-OK "Claude CLI 설치 완료" }
-  else { Write-Err "Claude CLI 설치 실패. 관리자 권한 PowerShell 에서 재시도." ; exit 1 }
+  if (Has-Cmd "claude") {
+    Write-OK "Claude CLI 설치 완료"
+  } else {
+    Write-Warn "Claude CLI 자동 감지 실패. PATH 새로고침 시도..."
+    Write-Host "  npm exit code: $npmExit" -ForegroundColor Gray
+    Write-Host "  npm output (마지막 10줄):" -ForegroundColor Gray
+    $npmOutput | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+
+    # 직접 경로 확인
+    $directPath = "$env:APPDATA\npm\claude.cmd"
+    if (Test-Path $directPath) {
+      Write-OK "Claude CLI 발견됨 ($directPath) — PATH 추가"
+      $env:Path = "$env:Path;$env:APPDATA\npm"
+    } else {
+      Write-Err "Claude CLI 설치 실패. 다음 중 하나 시도:"
+      Write-Host "    1. PowerShell 을 '관리자 권한으로 실행' 으로 다시 열고 스크립트 재실행"
+      Write-Host "    2. 수동 설치: npm install -g @anthropic-ai/claude-code"
+      Write-Host "    3. Node.js 가 제대로 설치됐는지 확인: node --version"
+      Read-Host "Enter 를 누르면 창이 닫힙니다"
+      return
+    }
+  }
 }
 
 # ── Step 4: 프로젝트 다운로드 ────────────────────────────────
@@ -102,7 +164,8 @@ if (Test-Path $InstallDir) {
   git clone $RepoUrl $InstallDir
   if ($LASTEXITCODE -ne 0) {
     Write-Err "git clone 실패. 레포 URL 확인: $RepoUrl"
-    exit 1
+    Read-Host "Enter 를 누르면 창이 닫힙니다"
+    return
   }
   Set-Location $InstallDir
   Write-OK "다운로드 완료"
