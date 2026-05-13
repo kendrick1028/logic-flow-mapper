@@ -163,30 +163,40 @@ async function runBatchPipeline(job) {
 
     const docId = `${item.book}__${item.unit}__${item.num}`;
 
-    // Skip if already saved in Firestore (forceReanalyze 가 켜져 있으면 스킵하지 않음)
-    try {
-      const existing = job.forceReanalyze ? null : await db.collection('analyses').doc(docId).get();
-      if (existing && existing.exists) {
+    // 이미 분석된 지문 확인 — forceReanalyze 모드면 무시
+    let existing = null;
+    if (!job.forceReanalyze) {
+      try {
+        const snap = await db.collection('analyses').doc(docId).get();
+        if (snap.exists) existing = snap.data();
+      } catch (e) { /* ignore */ }
+    }
+
+    if (existing) {
+      // 미분석/_error 어법 문장만 골라 부분 재분석
+      const partialResult = await tryPartialRetry(item, existing, job);
+      if (partialResult.fullySkipped) {
         job.results[docId] = 'skipped';
         job.skipped++;
-        job.done++;
-        try {
-          const d = existing.data();
-          job.resultData = job.resultData || {};
-          job.resultData[docId] = {
-            item,
-            result: {
-              // meta 필드 폐기 — 구 데이터에 있어도 무시
-              logic: d.logic || null,
-              vocab: d.vocab || null,
-              grammar: d.grammar || null
-            }
-          };
-        } catch (e) { /* ignore */ }
-        updateBatchUI(job);
-        return;
+      } else if (partialResult.updated) {
+        job.results[docId] = 'partial-retry';
+      } else {
+        job.results[docId] = 'skipped';
+        job.skipped++;
       }
-    } catch (e) { /* check failed, proceed with analysis */ }
+      job.done++;
+      job.resultData = job.resultData || {};
+      job.resultData[docId] = {
+        item,
+        result: {
+          logic: partialResult.logic || existing.logic || null,
+          vocab: partialResult.vocab || existing.vocab || null,
+          grammar: partialResult.grammar || existing.grammar || null
+        }
+      };
+      updateBatchUI(job);
+      return;
+    }
 
     // Analyze with up to 3 retries
     let success = false;
@@ -219,6 +229,101 @@ async function runBatchPipeline(job) {
   await Promise.all(tasks.map(fn => fn()));
 
   finishBatchJob(job);
+}
+
+// 이미 분석된 지문 — 미분석/누락된 어법 문장만 골라 부분 재분석
+// 반환: { fullySkipped, updated, logic, vocab, grammar }
+async function tryPartialRetry(item, existing, job) {
+  const sig = job.abortController.signal;
+  const passage = item.passage || '';
+  if (!passage || typeof splitIntoSentences !== 'function') {
+    return { fullySkipped: true, updated: false };
+  }
+  const expectedSentences = splitIntoSentences(passage);
+  const totalExpected = expectedSentences.length;
+  if (!totalExpected) return { fullySkipped: true, updated: false };
+
+  const currentGrammar = existing.grammar || {};
+  const currentSentences = Array.isArray(currentGrammar.sentences) ? currentGrammar.sentences : [];
+  const validSentences = currentSentences.filter(s => s && !s._error && Array.isArray(s.annotations));
+  const presentIds = new Set(validSentences.map(s => s.id));
+
+  // 미분석 ID 수집
+  const missingIds = [];
+  for (let i = 1; i <= totalExpected; i++) {
+    if (!presentIds.has(i)) missingIds.push(i);
+  }
+
+  if (missingIds.length === 0) {
+    return { fullySkipped: true, updated: false };
+  }
+
+  console.log(`[batch partial] ${item.book}__${item.unit}__${item.num}: ${missingIds.length}/${totalExpected} 미분석 → 재시도`);
+
+  // 미분석 문장만 병렬 재시도 (세마포어가 자동 throttle)
+  const provider = job.provider;
+  const model = job.model;
+  const option = job.option;
+
+  // 1차 시도 + 실패한 것 2회 추가 재시도
+  let pending = missingIds.map(id => ({ id, text: expectedSentences[id - 1] }));
+  const succeeded = [];
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && pending.length > 0; attempt++) {
+    if (sig.aborted) break;
+    if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 2000 : 5000));
+    const settled = await Promise.allSettled(pending.map(p => analyzeOneSentenceBatch(provider, model, p.text, p.id, sig, option)));
+    const stillFailed = [];
+    settled.forEach((s, k) => {
+      const p = pending[k];
+      if (s.status === 'fulfilled' && s.value) succeeded.push(s.value);
+      else stillFailed.push(p);
+    });
+    pending = stillFailed;
+  }
+
+  // 머지: 기존 정상 + 새로 성공한 것
+  const merged = validSentences.concat(succeeded).sort((a, b) => (a.id || 0) - (b.id || 0));
+
+  // 토큰 사용량 누적 (분석 1건 = 호출 1회, callAI 가 알아서 누적해주지 않으므로 수동)
+  // 여기선 단순화: usage 누적은 skip (Max CLI 모드에선 토큰 계산 의미 없음)
+
+  // Firestore 부분 업데이트 — 한 번에 쓰기 (race 방지)
+  const newGrammar = {
+    ...currentGrammar,
+    sentences: merged,
+    totalSentenceCount: totalExpected
+  };
+  try {
+    const docId = `${item.book}__${item.unit}__${item.num}`;
+    await db.collection('analyses').doc(docId).update({
+      grammar: newGrammar,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    console.warn('[batch partial] Firestore update failed:', e.message);
+  }
+
+  return {
+    fullySkipped: false,
+    updated: succeeded.length > 0,
+    logic: existing.logic,
+    vocab: existing.vocab,
+    grammar: newGrammar
+  };
+}
+
+// 한 문장만 분석 호출 (batch 컨텍스트용)
+async function analyzeOneSentenceBatch(provider, model, sentText, id, sig, option) {
+  const userMsg = `[입력 문장 — id=${id}]\n${sentText}\n\n위 문장(id=${id})을 분석하여 JSON 객체 1개만 출력. id 필드는 반드시 ${id}.`;
+  const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, sig, option);
+  let newS = null;
+  if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) newS = r.parsed.sentences[0];
+  else if (r.parsed && r.parsed.id != null) newS = r.parsed;
+  if (!newS || !Array.isArray(newS.annotations)) throw new Error('invalid response format');
+  newS.id = id;
+  if (!newS.text) newS.text = sentText;
+  return newS;
 }
 
 async function runSinglePassageAnalysis(item, job) {
@@ -724,7 +829,15 @@ function updateBatchUI(job) {
   } else if (job.phase === 'buildPdf') {
     dynamicSub = `📄 PDF 빌드 중... (${done}/${total} 완료)`;
   } else if (job.phase === 'done') {
-    dynamicSub = job.subLabel || `✅ 완료 — 성공 ${done - skipped} · 실패 ${failed}${skipped ? ' · 스킵 ' + skipped : ''}`;
+    // partial-retry 통계 — 이미 분석된 지문 중 미분석 문장 보강한 건수
+    const partialCount = Object.values(job.results || {}).filter(v => v === 'partial-retry').length;
+    const newCount = Object.values(job.results || {}).filter(v => v === 'done').length;
+    const parts = [];
+    if (newCount > 0) parts.push(`신규 ${newCount}`);
+    if (partialCount > 0) parts.push(`부분보강 ${partialCount}`);
+    if (skipped > 0) parts.push(`스킵 ${skipped}`);
+    if (failed > 0) parts.push(`실패 ${failed}`);
+    dynamicSub = job.subLabel || `✅ 완료 — ${parts.join(' · ')}`;
   } else if (job.phase === 'cancelled') {
     dynamicSub = job.subLabel || `⏸ 중단됨 — ${done + failed} / ${total} 처리`;
   } else if (job.phase === 'failed') {

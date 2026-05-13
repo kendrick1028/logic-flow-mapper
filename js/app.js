@@ -1011,6 +1011,21 @@ async function loadSavedAnalysis() {
       document.getElementById('grammarCard').style.display = '';
       // lastDetailResult 도 보강된 버전으로
       lastDetailResult = { logic: data.logic, vocab: data.vocab, grammar: grammarWithGaps };
+
+      // 미분석/_error 문장 있으면 자동으로 재분석 시작 (세션당 1회)
+      const hasFailures = grammarWithGaps.sentences.some(s => s && s._error);
+      if (hasFailures) {
+        const autoKey = `auto-retry-${docId}`;
+        if (!sessionStorage.getItem(autoKey)) {
+          sessionStorage.setItem(autoKey, '1');
+          setTimeout(() => {
+            if (typeof retryAllFailedGrammar === 'function') {
+              console.log('[auto-retry] 미분석 문장 자동 재분석 시작');
+              retryAllFailedGrammar();
+            }
+          }, 1200);
+        }
+      }
     } else {
       lastDetailResult = { logic: data.logic, vocab: data.vocab, grammar: null };
     }
