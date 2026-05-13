@@ -158,7 +158,9 @@ async function callClaudeViaApi({ model, system, userMessage }) {
   };
 }
 
-function callClaudeViaCli({ model, system, userMessage }) {
+// Windows 의 PowerShell + claude CLI 조합에서 긴 한글 인자가 shell escaping 에서 깨짐.
+// system prompt 는 임시 파일로 전달 (--system-prompt-file) → argument 길이/인코딩 문제 회피
+async function callClaudeViaCli({ model, system, userMessage }) {
   const args = [
     '-p',
     '--output-format', 'stream-json',
@@ -166,16 +168,29 @@ function callClaudeViaCli({ model, system, userMessage }) {
     '--permission-mode', 'bypassPermissions',
     '--max-turns', '1'
   ];
-  if (system && String(system).trim()) args.push('--system-prompt', String(system));
+
+  // System prompt → 임시 파일 (Windows 한글 깨짐 회피)
+  let tmpSysFile = null;
+  if (system && String(system).trim()) {
+    const os = await import('node:os');
+    tmpSysFile = path.join(os.tmpdir(), `lfm-sys-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2,8)}.txt`);
+    await fs.promises.writeFile(tmpSysFile, String(system), 'utf8');
+    args.push('--system-prompt-file', tmpSysFile);
+  }
   if (model) args.push('--model', model);
   args.push(userMessage);
 
   return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      if (tmpSysFile) {
+        fs.promises.unlink(tmpSysFile).catch(() => {});
+      }
+    };
+
     const childEnv = {
       ...process.env,
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '32000'
     };
-    // Windows 의 .cmd shim 은 shell:true 가 필요. 그 외엔 직접 spawn.
     const proc = spawn(resolveClaudeBin(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv,
@@ -184,18 +199,21 @@ function callClaudeViaCli({ model, system, userMessage }) {
     let stdoutBuf = '', stderrBuf = '';
     const timer = setTimeout(() => {
       proc.kill('SIGKILL');
+      cleanup();
       reject(new Error(`claude CLI timeout (${CLI_TIMEOUT_MS}ms)`));
     }, CLI_TIMEOUT_MS);
     proc.stdout.on('data', d => { stdoutBuf += d.toString(); });
     proc.stderr.on('data', d => { stderrBuf += d.toString(); });
     proc.on('error', err => {
       clearTimeout(timer);
+      cleanup();
       const e = new Error(`claude CLI 실행 실패: ${err.message}`);
       e.hint = `'claude' 명령어를 찾을 수 없습니다. Claude Code 가 설치되어 있는지(\`npm i -g @anthropic-ai/claude-code\`) PATH 에 있는지 확인하세요. 또는 .env 의 CLAUDE_BIN 에 절대경로 지정.`;
       reject(e);
     });
     proc.on('close', code => {
       clearTimeout(timer);
+      cleanup();
       let text = '', usage = null, stopReason = null, initInfo = null, lastError = null;
       for (const line of stdoutBuf.split('\n')) {
         const t = line.trim();
@@ -212,11 +230,14 @@ function callClaudeViaCli({ model, system, userMessage }) {
         }
       }
       if (code !== 0 || (!text && lastError)) {
-        const errMsg = lastError?.error || stderrBuf || `claude CLI 종료 코드 ${code}`;
+        const errMsg = lastError?.error || stderrBuf || `claude CLI 종료 코드 ${code} (stdout 비어있음)`;
         const e = new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
         if (/Not logged in|Invalid authentication|401/i.test(stdoutBuf + stderrBuf)) {
           e.hint = '터미널에서 `claude` 실행 → `/login` 으로 OAuth 로그인 후 다시 시도하세요.';
         }
+        // 디버그용 — 처음 200자 stdout/stderr 보내기
+        e.debug = { code, stdoutHead: stdoutBuf.slice(0, 200), stderrHead: stderrBuf.slice(0, 200) };
+        console.error('[claude CLI] exit', code, 'stderr:', stderrBuf.slice(0, 300), 'stdout:', stdoutBuf.slice(0, 300));
         return reject(e);
       }
       resolve({
