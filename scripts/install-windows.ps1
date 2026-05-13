@@ -1,4 +1,4 @@
-# Logic Flow Mapper — Windows 자동 설치 스크립트
+﻿# Logic Flow Mapper — Windows 자동 설치 스크립트
 # 사용: 이 파일 우클릭 → "PowerShell 로 실행"
 #
 # 실행 흐름:
