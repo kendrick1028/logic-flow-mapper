@@ -1546,8 +1546,19 @@ function renderGrammar(data) {
   g0.innerHTML = h;
 }
 
-// ── 실패한 문장 단일 재시도 ──────────────────────────────────
-// 호출 후: lastDetailResult 갱신 → renderGrammar 전체 재실행 + Firestore 동기화
+// ── 단일 문장 분석 호출 (analyzeOnly=true 면 Firestore 저장 안 함) ──
+async function analyzeOneSentence(id, sentText) {
+  const r = await callAI(currentProvider, currentModel, sentText, GRAMMAR_PER_SENTENCE_PROMPT, null, currentOption);
+  let newS = null;
+  if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) newS = r.parsed.sentences[0];
+  else if (r.parsed && r.parsed.id != null) newS = r.parsed;
+  if (!newS || !Array.isArray(newS.annotations)) throw new Error('invalid response format');
+  newS.id = id;
+  if (!newS.text) newS.text = sentText;
+  return newS;
+}
+
+// ── 실패한 문장 단일 재시도 (즉시 Firestore 동기화) ──────────
 async function retryGrammarSentence(id) {
   const cardEl = document.querySelector(`#g0 .gm-sentence[data-sid="${id}"]`);
   if (!cardEl) return false;
@@ -1555,62 +1566,91 @@ async function retryGrammarSentence(id) {
   if (!sentText) return false;
 
   const btn = cardEl.querySelector('.gm-retry-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 재분석 중...'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   cardEl.classList.add('gm-retrying');
 
   try {
-    const r = await callAI(currentProvider, currentModel, sentText, GRAMMAR_PER_SENTENCE_PROMPT, null, currentOption);
-    let newS = null;
-    if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) newS = r.parsed.sentences[0];
-    else if (r.parsed && r.parsed.id != null) newS = r.parsed;
-    if (!newS || !Array.isArray(newS.annotations)) throw new Error('invalid response format');
-    newS.id = id;
-    if (!newS.text) newS.text = sentText;
-
-    // 메모리 결과 — lastDetailResult 우선, 없으면 DOM 으로부터 재구성
-    if (!lastDetailResult) lastDetailResult = {};
-    if (!lastDetailResult.grammar) {
-      // DOM 에서 현재 sentences 재구성 (단순화: 빈 sentences 배열로 시작)
-      lastDetailResult.grammar = { sentences: [] };
-    }
-    const list = lastDetailResult.grammar.sentences;
-    const idx = list.findIndex(s => s && s.id === id);
-    if (idx >= 0) list[idx] = newS;
-    else list.push(newS);
-    list.sort((a, b) => (a.id || 0) - (b.id || 0));
-
+    const newS = await analyzeOneSentence(id, sentText);
+    updateLastDetailResultSentence(newS);
     renderGrammar(lastDetailResult.grammar);
     await persistGrammarUpdate(id, newS);
     return true;
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 다시 분석'; }
+    if (btn) { btn.disabled = false; btn.textContent = '분석'; }
     cardEl.classList.remove('gm-retrying');
     console.error('[retryGrammarSentence]', e);
-    alert(`재분석 실패: ${e.message || e}`);
     return false;
   }
 }
 
-// ── 모든 실패 문장 일괄 재시도 (병렬) ────────────────────────
+// ── 모든 실패 문장 일괄 재시도 ────────────────────────────────
+// 분석 자체는 병렬 (세마포어 8개 제한 내), Firestore 쓰기는 한 번에 (race 방지)
 async function retryAllFailedGrammar() {
   const failedCards = Array.from(document.querySelectorAll('#g0 .gm-sentence-error'));
   if (!failedCards.length) return;
   const banner = document.querySelector('#g0 .gm-retry-banner');
   const allBtn = banner ? banner.querySelector('.gm-retry-all-btn') : null;
-  if (allBtn) { allBtn.disabled = true; allBtn.textContent = '⏳ 재분석 중...'; }
+  if (allBtn) { allBtn.disabled = true; allBtn.textContent = '분석 중...'; }
+  failedCards.forEach(el => el.classList.add('gm-retrying'));
 
-  const ids = failedCards.map(el => parseInt(el.getAttribute('data-sid'), 10)).filter(Number.isFinite);
-  const results = await Promise.allSettled(ids.map(id => retryGrammarSentence(id)));
-  const success = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
-  const fail = results.length - success;
+  const items = failedCards.map(el => ({
+    id: parseInt(el.getAttribute('data-sid'), 10),
+    text: el.getAttribute('data-text') || ''
+  })).filter(it => Number.isFinite(it.id) && it.text);
 
-  if (allBtn) {
-    allBtn.disabled = false;
-    allBtn.textContent = '🔄 모두 다시 분석';
+  // 분석은 병렬 (세마포어가 자동 8개씩 throttle)
+  const results = await Promise.allSettled(items.map(it => analyzeOneSentence(it.id, it.text)));
+
+  // 성공한 것만 메모리(lastDetailResult)에 반영
+  let success = 0, fail = 0;
+  results.forEach(r => {
+    if (r.status === 'fulfilled') {
+      updateLastDetailResultSentence(r.value);
+      success++;
+    } else {
+      fail++;
+    }
+  });
+
+  renderGrammar(lastDetailResult.grammar);
+
+  // Firestore 쓰기 — 한 번만! (race 방지)
+  if (success > 0) {
+    await persistGrammarBatchUpdate();
   }
-  // alert 으로 결과 알림
-  if (fail === 0) alert(`✅ ${success}개 문장 재분석 완료`);
-  else alert(`재분석 — 성공 ${success} · 실패 ${fail}`);
+
+  if (allBtn) { allBtn.disabled = false; allBtn.textContent = '분석 실행'; }
+  if (fail === 0) alert(`✅ ${success}개 문장 분석 완료`);
+  else alert(`분석 — 성공 ${success} · 실패 ${fail}`);
+}
+
+// 메모리(lastDetailResult.grammar.sentences) 갱신 헬퍼
+function updateLastDetailResultSentence(newSentence) {
+  if (!lastDetailResult) lastDetailResult = {};
+  if (!lastDetailResult.grammar) lastDetailResult.grammar = { sentences: [] };
+  const list = lastDetailResult.grammar.sentences;
+  const idx = list.findIndex(s => s && s.id === newSentence.id);
+  if (idx >= 0) list[idx] = newSentence;
+  else list.push(newSentence);
+  list.sort((a, b) => (a.id || 0) - (b.id || 0));
+}
+
+// Firestore 일괄 갱신 — 현재 lastDetailResult.grammar 전체를 한 번에 sanitize+write
+async function persistGrammarBatchUpdate() {
+  try {
+    const u = document.getElementById('selUnit')?.value;
+    const n = document.getElementById('selNum')?.value;
+    if (!u || !n || manualMode) return;
+    if (typeof db === 'undefined' || !currentUser) return;
+    const docId = analysisDocId(currentBook, u, n);
+    const sanitized = sanitizeGrammarForSave(lastDetailResult.grammar);
+    await db.collection('analyses').doc(docId).update({
+      grammar: sanitized,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    console.warn('Firestore batch grammar update failed:', e);
+  }
 }
 
 // Firestore 의 grammar.sentences 배열 안 특정 문장만 업데이트 (성공한 경우만 저장)
