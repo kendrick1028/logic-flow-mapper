@@ -231,86 +231,155 @@ async function runBatchPipeline(job) {
   finishBatchJob(job);
 }
 
-// 이미 분석된 지문 — 미분석/누락된 어법 문장만 골라 부분 재분석
+// 이미 분석된 지문 — 미분석/누락된 어법·어휘·Logic Flow 모두 골라 부분 재분석
 // 반환: { fullySkipped, updated, logic, vocab, grammar }
 async function tryPartialRetry(item, existing, job) {
   const sig = job.abortController.signal;
   const passage = item.passage || '';
-  if (!passage || typeof splitIntoSentences !== 'function') {
-    return { fullySkipped: true, updated: false };
-  }
-  const expectedSentences = splitIntoSentences(passage);
-  const totalExpected = expectedSentences.length;
-  if (!totalExpected) return { fullySkipped: true, updated: false };
+  if (!passage) return { fullySkipped: true, updated: false };
 
-  const currentGrammar = existing.grammar || {};
-  const currentSentences = Array.isArray(currentGrammar.sentences) ? currentGrammar.sentences : [];
-  const validSentences = currentSentences.filter(s => s && !s._error && Array.isArray(s.annotations));
-  const presentIds = new Set(validSentences.map(s => s.id));
-
-  // 미분석 ID 수집
-  const missingIds = [];
-  for (let i = 1; i <= totalExpected; i++) {
-    if (!presentIds.has(i)) missingIds.push(i);
-  }
-
-  if (missingIds.length === 0) {
-    return { fullySkipped: true, updated: false };
-  }
-
-  console.log(`[batch partial] ${item.book}__${item.unit}__${item.num}: ${missingIds.length}/${totalExpected} 미분석 → 재시도`);
-
-  // 미분석 문장만 병렬 재시도 (세마포어가 자동 throttle)
   const provider = job.provider;
   const model = job.model;
   const option = job.option;
 
-  // 1차 시도 + 실패한 것 2회 추가 재시도
-  let pending = missingIds.map(id => ({ id, text: expectedSentences[id - 1] }));
-  const succeeded = [];
-  const MAX_ATTEMPTS = 3;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS && pending.length > 0; attempt++) {
-    if (sig.aborted) break;
-    if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 2000 : 5000));
-    const settled = await Promise.allSettled(pending.map(p => analyzeOneSentenceBatch(provider, model, p.text, p.id, sig, option)));
-    const stillFailed = [];
-    settled.forEach((s, k) => {
-      const p = pending[k];
-      if (s.status === 'fulfilled' && s.value) succeeded.push(s.value);
-      else stillFailed.push(p);
-    });
-    pending = stillFailed;
+  // ── 무엇이 누락됐는지 판단 ──
+  const docId = `${item.book}__${item.unit}__${item.num}`;
+  const needsLogic = !existing.logic
+    || !Array.isArray(existing.logic.sentences) || existing.logic.sentences.length === 0;
+  const needsVocab = !existing.vocab
+    || !Array.isArray(existing.vocab.vocabulary) || existing.vocab.vocabulary.length === 0;
+
+  // 어법: 미분석 문장 ID 수집
+  let missingIds = [];
+  let expectedSentences = [];
+  let totalExpected = 0;
+  if (typeof splitIntoSentences === 'function') {
+    expectedSentences = splitIntoSentences(passage);
+    totalExpected = expectedSentences.length;
+    if (totalExpected > 0) {
+      const currentGrammar = existing.grammar || {};
+      const currentSentences = Array.isArray(currentGrammar.sentences) ? currentGrammar.sentences : [];
+      const validSentences = currentSentences.filter(s => s && !s._error && Array.isArray(s.annotations));
+      const presentIds = new Set(validSentences.map(s => s.id));
+      for (let i = 1; i <= totalExpected; i++) {
+        if (!presentIds.has(i)) missingIds.push(i);
+      }
+    }
   }
 
-  // 머지: 기존 정상 + 새로 성공한 것
-  const merged = validSentences.concat(succeeded).sort((a, b) => (a.id || 0) - (b.id || 0));
+  // 누락 없으면 full skip
+  if (!needsLogic && !needsVocab && missingIds.length === 0) {
+    return { fullySkipped: true, updated: false };
+  }
 
-  // 토큰 사용량 누적 (분석 1건 = 호출 1회, callAI 가 알아서 누적해주지 않으므로 수동)
-  // 여기선 단순화: usage 누적은 skip (Max CLI 모드에선 토큰 계산 의미 없음)
+  const missingParts = [];
+  if (needsLogic) missingParts.push('Logic Flow');
+  if (needsVocab) missingParts.push('어휘');
+  if (missingIds.length) missingParts.push(`어법 ${missingIds.length}/${totalExpected}`);
+  console.log(`[batch partial] ${docId}: 누락 [${missingParts.join(', ')}] → 재시도`);
 
-  // Firestore 부분 업데이트 — 한 번에 쓰기 (race 방지)
+  // ── 병렬 실행 (Logic + Vocab + Grammar 모두 동시에) ──
+  const tasks = [];
+
+  // Logic Flow
+  let logicPromise = Promise.resolve({ status: 'skipped', value: existing.logic });
+  if (needsLogic) {
+    logicPromise = retryWithBackoff(() => callAI(provider, model, passage, null, sig, option), sig)
+      .then(r => ({ status: 'fulfilled', value: r.parsed }))
+      .catch(e => ({ status: 'rejected', reason: e }));
+  }
+  tasks.push(logicPromise);
+
+  // Vocabulary
+  let vocabPromise = Promise.resolve({ status: 'skipped', value: existing.vocab });
+  if (needsVocab && typeof VOCABULARY_PROMPT !== 'undefined') {
+    vocabPromise = retryWithBackoff(() => callAI(provider, model, passage, VOCABULARY_PROMPT, sig, option), sig)
+      .then(r => ({ status: 'fulfilled', value: r.parsed }))
+      .catch(e => ({ status: 'rejected', reason: e }));
+  }
+  tasks.push(vocabPromise);
+
+  // Grammar — 미분석 문장만, 자체 재시도 로직 사용
+  const grammarPromise = (missingIds.length > 0)
+    ? retryMissingSentences(missingIds, expectedSentences, provider, model, option, sig)
+    : Promise.resolve([]);
+  tasks.push(grammarPromise);
+
+  const [logicResult, vocabResult, grammarSucceeded] = await Promise.all(tasks);
+
+  // ── 결과 머지 ──
+  const newLogic = (logicResult.status === 'fulfilled' && logicResult.value) ? logicResult.value : existing.logic;
+  const newVocab = (vocabResult.status === 'fulfilled' && vocabResult.value) ? vocabResult.value : existing.vocab;
+
+  const currentGrammar = existing.grammar || {};
+  const validSentences = (Array.isArray(currentGrammar.sentences) ? currentGrammar.sentences : [])
+    .filter(s => s && !s._error && Array.isArray(s.annotations));
+  const merged = validSentences.concat(grammarSucceeded).sort((a, b) => (a.id || 0) - (b.id || 0));
   const newGrammar = {
     ...currentGrammar,
     sentences: merged,
-    totalSentenceCount: totalExpected
+    totalSentenceCount: totalExpected || merged.length
   };
-  try {
-    const docId = `${item.book}__${item.unit}__${item.num}`;
-    await db.collection('analyses').doc(docId).update({
-      grammar: newGrammar,
-      savedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  } catch (e) {
-    console.warn('[batch partial] Firestore update failed:', e.message);
+
+  // ── Firestore 한 번에 쓰기 (race 방지) ──
+  const anyUpdated = (logicResult.status === 'fulfilled' && needsLogic)
+                 || (vocabResult.status === 'fulfilled' && needsVocab)
+                 || grammarSucceeded.length > 0;
+  if (anyUpdated) {
+    try {
+      await db.collection('analyses').doc(docId).update({
+        logic: newLogic || null,
+        vocab: newVocab || null,
+        grammar: newGrammar,
+        savedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (e) {
+      console.warn('[batch partial] Firestore update failed:', e.message);
+    }
   }
 
   return {
     fullySkipped: false,
-    updated: succeeded.length > 0,
-    logic: existing.logic,
-    vocab: existing.vocab,
+    updated: anyUpdated,
+    logic: newLogic,
+    vocab: newVocab,
     grammar: newGrammar
   };
+}
+
+// 미분석 문장 ID 모음을 받아 병렬 분석 + 자체 재시도
+async function retryMissingSentences(ids, expectedSentences, provider, model, option, sig) {
+  let pending = ids.map(id => ({ id, text: expectedSentences[id - 1] }));
+  const succeeded = [];
+  const MAX = 3;
+  for (let attempt = 1; attempt <= MAX && pending.length > 0; attempt++) {
+    if (sig.aborted) break;
+    if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 2000 : 5000));
+    const settled = await Promise.allSettled(pending.map(p => analyzeOneSentenceBatch(provider, model, p.text, p.id, sig, option)));
+    const fail = [];
+    settled.forEach((s, k) => {
+      const p = pending[k];
+      if (s.status === 'fulfilled' && s.value) succeeded.push(s.value);
+      else fail.push(p);
+    });
+    pending = fail;
+  }
+  return succeeded;
+}
+
+// 일반 호출 + 최대 3회 백오프 재시도 (logic/vocab 같은 단일 호출용)
+async function retryWithBackoff(fn, sig) {
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (sig && sig.aborted) throw new Error('aborted');
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) await new Promise(r => setTimeout(r, attempt === 1 ? 2000 : 5000));
+    }
+  }
+  throw lastErr;
 }
 
 // 한 문장만 분석 호출 (batch 컨텍스트용)
