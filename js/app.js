@@ -999,6 +999,14 @@ async function loadSavedAnalysis() {
     if (data.logic) {
       renderLogicFlowInDetail(data.logic, loadedPassage);
       document.getElementById('logicFlowCard').style.display = '';
+      // titleKo 누락 시 백그라운드 재생성 (세션당 1회)
+      if (!data.logic.titleKo || !String(data.logic.titleKo).trim()) {
+        const titleKey = `auto-title-${docId}`;
+        if (!sessionStorage.getItem(titleKey)) {
+          sessionStorage.setItem(titleKey, '1');
+          setTimeout(() => regenerateMissingTitle(docId, loadedPassage), 800);
+        }
+      }
     }
     if (data.vocab) {
       renderVocabulary(data.vocab.vocabulary || []);
@@ -1697,9 +1705,41 @@ async function persistGrammarUpdate(sentenceId, newSentence) {
   }
 }
 
+// ── 한국어 제목 누락 시 백그라운드 재생성 ────────────────────────
+// 로드한 분석의 logic.titleKo 가 비어있을 때, 가벼운 TITLE_ONLY_PROMPT 로
+// 제목만 받아 메모리(lastDetailResult.logic.titleKo) 및 Firestore 갱신.
+async function regenerateMissingTitle(docId, passage) {
+  if (!passage || typeof TITLE_ONLY_PROMPT === 'undefined') return;
+  try {
+    if (!currentModel) return;
+    const r = await callAI(currentProvider, currentModel, passage, TITLE_ONLY_PROMPT, null, currentOption);
+    const newTitle = r && r.parsed && r.parsed.titleKo ? String(r.parsed.titleKo).trim() : '';
+    if (!newTitle) return;
+    // 메모리 갱신
+    if (lastDetailResult && lastDetailResult.logic) {
+      lastDetailResult.logic.titleKo = newTitle;
+    }
+    // Firestore 갱신 (자동 — 사용자 액션 없이도)
+    if (typeof db !== 'undefined' && currentUser && !manualMode) {
+      try {
+        await db.collection('analyses').doc(docId).update({
+          'logic.titleKo': newTitle,
+          savedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log(`[auto-title] '${newTitle}' 생성 + 저장 완료 (${docId})`);
+      } catch (e) {
+        console.warn('[auto-title] Firestore 저장 실패:', e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[auto-title] 제목 생성 실패:', e && e.message ? e.message : e);
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.retryGrammarSentence = retryGrammarSentence;
   window.retryAllFailedGrammar = retryAllFailedGrammar;
+  window.regenerateMissingTitle = regenerateMissingTitle;
 }
 
 async function downloadDetailPDF(ev) {

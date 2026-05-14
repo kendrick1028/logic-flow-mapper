@@ -248,6 +248,10 @@ async function tryPartialRetry(item, existing, job) {
     || !Array.isArray(existing.logic.sentences) || existing.logic.sentences.length === 0;
   const needsVocab = !existing.vocab
     || !Array.isArray(existing.vocab.vocabulary) || existing.vocab.vocabulary.length === 0;
+  // titleKo 만 누락 (logic 본문은 있음) → 가벼운 title-only 호출로 채우기
+  const needsTitleOnly = !needsLogic
+    && existing.logic
+    && (!existing.logic.titleKo || !String(existing.logic.titleKo).trim());
 
   // 어법: 미분석 문장 ID 수집
   let missingIds = [];
@@ -268,12 +272,13 @@ async function tryPartialRetry(item, existing, job) {
   }
 
   // 누락 없으면 full skip
-  if (!needsLogic && !needsVocab && missingIds.length === 0) {
+  if (!needsLogic && !needsVocab && !needsTitleOnly && missingIds.length === 0) {
     return { fullySkipped: true, updated: false };
   }
 
   const missingParts = [];
   if (needsLogic) missingParts.push('Logic Flow');
+  else if (needsTitleOnly) missingParts.push('제목');
   if (needsVocab) missingParts.push('어휘');
   if (missingIds.length) missingParts.push(`어법 ${missingIds.length}/${totalExpected}`);
   console.log(`[batch partial] ${docId}: 누락 [${missingParts.join(', ')}] → 재시도`);
@@ -281,7 +286,7 @@ async function tryPartialRetry(item, existing, job) {
   // ── 병렬 실행 (Logic + Vocab + Grammar 모두 동시에) ──
   const tasks = [];
 
-  // Logic Flow
+  // Logic Flow (전체 재생성) — needsLogic 일 때
   let logicPromise = Promise.resolve({ status: 'skipped', value: existing.logic });
   if (needsLogic) {
     logicPromise = retryWithBackoff(() => callAI(provider, model, passage, null, sig, option), sig)
@@ -289,6 +294,15 @@ async function tryPartialRetry(item, existing, job) {
       .catch(e => ({ status: 'rejected', reason: e }));
   }
   tasks.push(logicPromise);
+
+  // titleKo 만 따로 채우기 (Logic Flow 본문은 있는데 titleKo 만 빈 경우)
+  let titleOnlyPromise = Promise.resolve({ status: 'skipped', value: null });
+  if (needsTitleOnly && typeof TITLE_ONLY_PROMPT !== 'undefined') {
+    titleOnlyPromise = retryWithBackoff(() => callAI(provider, model, passage, TITLE_ONLY_PROMPT, sig, option), sig)
+      .then(r => ({ status: 'fulfilled', value: (r && r.parsed && r.parsed.titleKo) || '' }))
+      .catch(e => ({ status: 'rejected', reason: e }));
+  }
+  tasks.push(titleOnlyPromise);
 
   // Vocabulary
   let vocabPromise = Promise.resolve({ status: 'skipped', value: existing.vocab });
@@ -305,10 +319,14 @@ async function tryPartialRetry(item, existing, job) {
     : Promise.resolve([]);
   tasks.push(grammarPromise);
 
-  const [logicResult, vocabResult, grammarSucceeded] = await Promise.all(tasks);
+  const [logicResult, titleResult, vocabResult, grammarSucceeded] = await Promise.all(tasks);
 
   // ── 결과 머지 ──
-  const newLogic = (logicResult.status === 'fulfilled' && logicResult.value) ? logicResult.value : existing.logic;
+  let newLogic = (logicResult.status === 'fulfilled' && logicResult.value) ? logicResult.value : existing.logic;
+  // titleKo 만 따로 받은 경우 → 기존 logic 객체에 titleKo 만 패치
+  if (needsTitleOnly && titleResult && titleResult.status === 'fulfilled' && titleResult.value) {
+    newLogic = { ...(newLogic || {}), titleKo: titleResult.value };
+  }
   const newVocab = (vocabResult.status === 'fulfilled' && vocabResult.value) ? vocabResult.value : existing.vocab;
 
   const currentGrammar = existing.grammar || {};
@@ -322,7 +340,9 @@ async function tryPartialRetry(item, existing, job) {
   };
 
   // ── Firestore 한 번에 쓰기 (race 방지) ──
+  const titleUpdated = needsTitleOnly && titleResult && titleResult.status === 'fulfilled' && titleResult.value;
   const anyUpdated = (logicResult.status === 'fulfilled' && needsLogic)
+                 || titleUpdated
                  || (vocabResult.status === 'fulfilled' && needsVocab)
                  || grammarSucceeded.length > 0;
   if (anyUpdated) {
