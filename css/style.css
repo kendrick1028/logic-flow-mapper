@@ -1067,6 +1067,10 @@ tr:last-child td{border-bottom:none}
   background:linear-gradient(180deg, transparent 30%, #ffd699 30%, #ffd699 95%, transparent 95%);
   padding:0 2px;
   border-radius:1px;
+  /* multi-line 시 마지막 줄이 카드 끝까지 늘어나는 현상 방지 */
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+  display:inline;
 }
 sup.gr-role-main{
   font-size:10px;color:#e65100;font-weight:800;
@@ -1078,6 +1082,9 @@ sup.gr-role-main{
   background:linear-gradient(180deg, transparent 30%, #fff59d 30%, #fff59d 95%, transparent 95%);
   padding:0 2px;
   border-radius:1px;
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+  display:inline;
 }
 sup.gr-role-clause{
   font-size:10px;color:#bf9000;font-weight:800;
@@ -1261,7 +1268,11 @@ sup.gr-omit-tag{
 }
 
 /* 전치사구 — 파랑 괄호 wrap */
-.gr-prep-phrase{position:relative;padding:0 1px}
+.gr-prep-phrase{
+  position:relative;padding:0 1px;
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+}
 .gr-prep-phrase::before{
   content:'(';color:#1565c0;font-weight:800;font-size:1em;margin-right:1px;
 }
@@ -1271,7 +1282,11 @@ sup.gr-omit-tag{
 }
 
 /* 접속사절 — 빨강 대괄호 wrap */
-.gr-clause-bracket{position:relative;padding:0 1px}
+.gr-clause-bracket{
+  position:relative;padding:0 1px;
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+}
 .gr-clause-bracket::before{
   content:'[';color:#d32f2f;font-weight:800;font-size:1em;margin-right:1px;
 }
