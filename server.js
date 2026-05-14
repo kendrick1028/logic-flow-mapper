@@ -166,7 +166,13 @@ async function callClaudeViaCli({ model, system, userMessage }) {
     '--output-format', 'stream-json',
     '--verbose',
     '--permission-mode', 'bypassPermissions',
-    '--max-turns', '1'
+    '--max-turns', '1',
+    // 사용자 Claude Code 환경의 MCP/도구 정의를 입력 컨텍스트에서 제거.
+    // (--mcp-config 없이 --strict-mcp-config → MCP 0개, --tools "" → 도구 0개)
+    // 어법/Logic Flow 분석에는 도구가 필요 없고, MCP 도구 정의가 매 호출 14K+ 토큰을
+    // 차지해 응답 지연/quota 소진 원인이었음.
+    '--strict-mcp-config',
+    '--tools', ''
   ];
 
   // System prompt → 임시 파일 (Windows 한글 깨짐 회피)
@@ -335,7 +341,8 @@ async function handleClaudePdf(req, res) {
 function checkClaudeAuth() {
   return new Promise((resolve) => {
     const proc = spawn(resolveClaudeBin(), [
-      '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '1', 'ok'
+      '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '1',
+      '--strict-mcp-config', '--tools', '', 'ok'
     ], { stdio: ['ignore', 'pipe', 'pipe'], shell: IS_WINDOWS });
     let stdoutBuf = '', stderrBuf = '';
     // Windows 콜드 스타트가 길어 30초로 확장
