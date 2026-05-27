@@ -8,7 +8,8 @@ const BOOKS = {
   '영어독해와작문 비상(김진완)': DB_BISANG_RW,
   '수능 빌드업 영어독해': DB_BUILDUP,
   '리딩마스터 수능 고난도': DB_READINGMASTER,
-  '해커스 미니모의고사': DB_HACKERS
+  '해커스 미니모의고사': DB_HACKERS,
+  'TED 강연': DB_TED
 };
 
 // ── State ──
