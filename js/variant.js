@@ -3010,6 +3010,31 @@ function buildQuickAnswerHtml(paper) {
   `;
 }
 
+// 수능 시험지식 선지 렌더 — 짧은 선지(순서·연결어·요약·단어 빈칸 등)는 2열,
+// 긴 선지(제목·주제·주장·내용일치·긴 빈칸 등)는 1열. 원 번호(①~⑤) 보장.
+function renderChoicesBlock(choices) {
+  const WRAP = 'word-break:break-word;overflow-wrap:anywhere;';
+  const norm = choices.map((c, i) => {
+    let s = String(c == null ? '' : c).trim();
+    if (!/^[①-⑩]/.test(s)) s = `${CHOICE_MARKS[i] || (i + 1) + '.'} ${s}`;
+    return s;
+  });
+  // 원 번호·태그 제거 후 길이 측정 → 2열/1열 판정 (수능 휴리스틱)
+  const lens = norm.map(s => s.replace(/^[①-⑩]\s*/, '').replace(/<[^>]+>/g, '').length);
+  const hasBr = norm.some(s => /<br/i.test(s));
+  const twoCol = !hasBr && lens.length >= 4 && Math.max(...lens) <= 30;
+  if (twoCol) {
+    let h = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 20px;font-size:10.5px;line-height:1.7;color:#222;margin-top:3px;${WRAP}">`;
+    norm.forEach(s => { h += `<div style="${WRAP}">${sanitizeMarkedHtml(s)}</div>`; });
+    h += `</div>`;
+    return h;
+  }
+  let h = `<div style="font-size:10.5px;line-height:1.85;color:#222;margin-top:3px;${WRAP}">`;
+  norm.forEach(s => { h += `<div style="margin:2px 0;padding-left:15px;text-indent:-15px;${WRAP}">${sanitizeMarkedHtml(s)}</div>`; });
+  h += `</div>`;
+  return h;
+}
+
 function renderVariantQuestion(q, { showAnswer, srcPassage, job }) {
   const num = q._num || '?';
   const typeLabel = q.type || '';
@@ -3049,9 +3074,9 @@ function renderVariantQuestion(q, { showAnswer, srcPassage, job }) {
   h += `<div style="font-size:9px;font-weight:700;color:#4f6ef7;background:#eef1fd;padding:2px 6px;border-radius:8px;white-space:nowrap;flex-shrink:0">${escapeHtmlVar(typeLabel)}</div>`;
   h += `</div>`;
 
-  // ── 본문 지문 ──
+  // ── 본문 지문 (수능 시험지식: 흰 바탕, 좌측 옅은 경계선, 들여쓰기 양끝맞춤) ──
   if (passageHtml) {
-    h += `<div style="font-size:10.5px;line-height:1.7;color:#222;background:#fafafa;border:1px solid #eee;border-radius:4px;padding:8px 10px;margin-bottom:6px;text-align:justify;${WRAP_STYLE}">${passageHtml}</div>`;
+    h += `<div style="font-size:10.5px;line-height:1.8;color:#1a1a1a;background:#fff;border:1px solid #e3e3e3;border-radius:3px;padding:9px 12px;margin-bottom:7px;text-align:justify;text-indent:6px;${WRAP_STYLE}">${passageHtml}</div>`;
   }
 
   // passageRef
@@ -3061,11 +3086,7 @@ function renderVariantQuestion(q, { showAnswer, srcPassage, job }) {
 
   if (q.format === 'obj') {
     if (!shouldSkipChoicesBlock(q) && choices.length) {
-      h += `<div style="font-size:10.5px;line-height:1.75;color:#222;${WRAP_STYLE}">`;
-      choices.forEach(c => {
-        h += `<div style="margin:2px 0;padding-left:14px;text-indent:-14px;${WRAP_STYLE}">${sanitizeMarkedHtml(String(c == null ? '' : c))}</div>`;
-      });
-      h += `</div>`;
+      h += renderChoicesBlock(choices);
     }
   } else {
     h += `<div style="margin-top:4px;border:1px dashed #bbb;border-radius:4px;padding:16px 8px;min-height:45px;font-size:9px;color:#bbb;text-align:center">답란</div>`;

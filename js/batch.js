@@ -255,8 +255,8 @@ async function tryPartialRetry(item, existing, job) {
   const docId = `${item.book}__${item.unit}__${item.num}`;
   const needsLogic = !existing.logic
     || !Array.isArray(existing.logic.sentences) || existing.logic.sentences.length === 0;
-  const needsVocab = !existing.vocab
-    || !Array.isArray(existing.vocab.vocabulary) || existing.vocab.vocabulary.length === 0;
+  // 어휘 분석은 '단어' 탭으로 분리 — 일괄 상세분석에서는 더 이상 생성하지 않음 (기존 vocab 은 보존)
+  const needsVocab = false;
   // titleKo 만 누락 (logic 본문은 있음) → 가벼운 title-only 호출로 채우기
   const needsTitleOnly = !needsLogic
     && existing.logic
@@ -432,17 +432,16 @@ async function runSinglePassageAnalysis(item, job) {
   const effort = job.effort;
   const fast = job.fast;
 
-  // 3개 영역 (Logic Flow / Vocab / Grammar) 병렬 호출. 메타·지문구조 제거됨.
+  // 2개 영역 (Logic Flow / Grammar) 병렬 호출. 어휘 분석은 '단어' 탭으로 분리되어 제거됨.
   // 어법은 문장 단위 분할 병렬 호출 (timeout 회피).
-  const [logicR, vocabR, grammarR] = await Promise.allSettled([
+  const [logicR, grammarR] = await Promise.allSettled([
     callAI(provider, model, item.passage, null, sig, option, effort, fast),
-    callAI(provider, model, item.passage, VOCABULARY_PROMPT, sig, option, effort, fast),
     callGrammarChunked(provider, model, item.passage, sig, option, effort, fast)
   ]);
 
   // 실제 API 응답의 usage 누적 (없으면 무시)
   job._tokens = job._tokens || { input: 0, output: 0, cached: 0, calls: 0 };
-  [logicR, vocabR, grammarR].forEach(r => {
+  [logicR, grammarR].forEach(r => {
     if (r.status !== 'fulfilled') return;
     job._tokens.calls = (job._tokens.calls || 0) + 1;
     const usage = r.value && r.value.usage;
@@ -455,11 +454,10 @@ async function runSinglePassageAnalysis(item, job) {
 
   const result = {
     logic: logicR.status === 'fulfilled' ? logicR.value.parsed : null,
-    vocab: vocabR.status === 'fulfilled' ? vocabR.value.parsed : null,
     grammar: grammarR.status === 'fulfilled' ? grammarR.value.parsed : null
   };
 
-  if (!result.logic && !result.vocab && !result.grammar) {
+  if (!result.logic && !result.grammar) {
     throw new Error('모든 분석 실패');
   }
   return result;
@@ -512,10 +510,7 @@ function _batchPopulateDetailCards(result, passageText) {
     renderLogicFlowInDetail(result.logic, passageText || '');
     document.getElementById('logicFlowCard').style.display = '';
   }
-  if (result.vocab && typeof renderVocabulary === 'function') {
-    renderVocabulary(result.vocab.vocabulary || []);
-    document.getElementById('vocabCard').style.display = '';
-  }
+  // 어휘 분석은 '단어' 탭으로 분리 — 일괄 상세분석 PDF 에서는 제외
   if (result.grammar && typeof renderGrammar === 'function') {
     renderGrammar(result.grammar);
     document.getElementById('grammarCard').style.display = '';
@@ -638,24 +633,10 @@ async function buildBatchPdf(job) {
       const passageNumText = item.num ? (String(item.num).match(/\d+/) ? String(item.num).match(/\d+/)[0] + '번' : String(item.num)) : '';
       const passageTitleKo = (result && result.logic && result.logic.titleKo) || '';
 
-      // 어휘: 지문 번호/제목 + "핵심단어" + 행 단위
+      // 지문 번호/제목 헤더 (어휘 분석 제거됨 → 첫 섹션 맨 위에 배치)
       let passageHeaderImg = null;
-      let vocabHeaderImg = null;
-      const vocabRowImgs = [];
-      if (document.getElementById('vocabCard').style.display !== 'none') {
-        if (passageNumText || passageTitleKo) {
-          passageHeaderImg = await captureNode(makePassageHeader(passageNumText, passageTitleKo));
-        }
-        vocabHeaderImg = await captureNode(makeSubtitle('핵심단어'));
-
-        const cells = Array.from(document.querySelectorAll('#vocabContent .vocab-grid .vcell'));
-        for (let i = 0; i < cells.length; i += 2) {
-          const row = document.createElement('div');
-          row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;background:transparent';
-          row.appendChild(cells[i].cloneNode(true));
-          if (i + 1 < cells.length) row.appendChild(cells[i + 1].cloneNode(true));
-          vocabRowImgs.push(await captureNode(row));
-        }
+      if (passageNumText || passageTitleKo) {
+        passageHeaderImg = await captureNode(makePassageHeader(passageNumText, passageTitleKo));
       }
 
       // 어법: "어법분석" 부제목 + 범례 + 문장
@@ -715,21 +696,9 @@ async function buildBatchPdf(job) {
         }
       };
 
-      // 1) 첫 페이지 — 지문 번호/제목 + "핵심단어" 부제목 + 행 단위
+      // 1) 첫 페이지 — 지문 번호/제목 헤더 + 어법 분석 (문장 단위 keepTogether)
       if (passageHeaderImg) placeInFlow(passageHeaderImg);
-      if (vocabHeaderImg)   placeInFlow(vocabHeaderImg);
-      for (const rowImg of vocabRowImgs) {
-        if (rowImg.heightMm <= usableH && y + rowImg.heightMm > bottomLimit) {
-          pdf.addPage();
-          y = newPageStartY;
-        }
-        placeInFlow(rowImg);
-      }
-
-      // 2) 어법 분석: 새 페이지 + 문장 단위 keepTogether
       if (grammarHeaderImg) {
-        pdf.addPage();
-        y = newPageStartY;
         placeInFlow(grammarHeaderImg);
         for (const img of sentenceImgs) {
           if (img.heightMm <= usableH && y + img.heightMm > bottomLimit) {

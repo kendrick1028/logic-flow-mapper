@@ -248,7 +248,15 @@ async function buildPdfFromSections(sections, options = {}) {
   }
 
   // ── 해설지 ──
+  // 답지는 항상 홀수 페이지에서 시작 (양면 인쇄 시 답지가 새 장 앞면에 오도록).
+  // 자연스러운 시작 페이지가 짝수가 되는 경우 그 앞에 빈 페이지를 끼워 홀수로 맞춘다.
+  const blankPages = new Set();
   if (opts.answerKey && Array.isArray(opts.answerKey) && opts.answerKey.length) {
+    // 현재 마지막 페이지가 홀수면 → 새 페이지(답지)는 짝수가 되므로 빈 페이지 1장 삽입
+    if (pdf.internal.getNumberOfPages() % 2 === 1) {
+      pdf.addPage();                                  // 빈 짝수 페이지
+      blankPages.add(pdf.internal.getNumberOfPages());
+    }
     startNewPage();
     const sepHtml = `
       <div style="padding:30px 0 20px 0;text-align:center">
@@ -300,6 +308,9 @@ async function buildPdfFromSections(sections, options = {}) {
   const totalPages = pdf.internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     pdf.setPage(p);
+
+    // 답지 정렬용으로 끼운 빈 페이지는 장식 없이 비워둔다
+    if (blankPages.has(p)) continue;
 
     // 머릿말: 2페이지부터 (단, 해설지 첫 페이지는 별도 표시 생략)
     if (p > 1) {
