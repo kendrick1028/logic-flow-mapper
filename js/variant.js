@@ -2122,6 +2122,7 @@ function startMcqJob() {
   const model = document.getElementById('mcqModel').value;
   const answerSeparate = !!(document.getElementById('mcqAnswerSeparate') || {}).checked;
   const includeCover = !!(document.getElementById('mcqIncludeCover') || {}).checked;
+  const excludePrev = !!(document.getElementById('mcqExcludePrev') || {}).checked;
   const fast = !!(document.getElementById('mcqFast') || {}).checked;
   const effort = (document.getElementById('mcqEffort') || {}).value || DEFAULT_EFFORT;
   const paperTitle = ((document.getElementById('mcqPaperTitle') || {}).value || '').trim();
@@ -2142,7 +2143,7 @@ function startMcqJob() {
     items, totalQ, objN, subN, diff,
     typesSel: MCQ_FIXED_TYPES.slice(),
     intent: '',
-    excludePrev: false,
+    excludePrev,
     provider, model, answerSeparate, answerInline: !answerSeparate,
     variation: 'none', showVariationBadge: false, qualityReview: false, includeCover,
     studentName: '', studentWeakness: '',
