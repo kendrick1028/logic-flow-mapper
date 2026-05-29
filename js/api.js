@@ -879,6 +879,7 @@ if (typeof window !== 'undefined') {
 const AI_MODELS = [
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'gemini' },
   { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', provider: 'gemini' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'claude' },
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'claude' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'claude' },
   { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai' },
@@ -889,6 +890,7 @@ const AI_MODELS = [
 
 // 모델별 옵션 (없는 모델은 옵션 선택 안 뜸)
 const AI_MODEL_OPTIONS = {
+  'claude-opus-4-8': ['medium', 'high', 'max'],
   'claude-opus-4-6': ['medium', 'high', 'max'],
   'claude-sonnet-4-6': ['medium', 'high', 'max'],
   'gpt-5.4': ['high', 'medium', 'low'],
