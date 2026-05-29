@@ -14,8 +14,8 @@ const BOOKS = {
 
 // ── State ──
 let currentBook = localStorage.getItem('lfm_book') || '수능특강 영어';
-let currentProvider = 'gemini';
-let currentModel = 'gemini-3.1-pro-preview';
+let currentProvider = 'claude';
+let currentModel = 'claude-opus-4-8';
 let currentOption = null;
 let manualMode = false;
 let currentPanel = localStorage.getItem('lfm_panel') || 'home';
@@ -768,13 +768,13 @@ function switchPanel(panel) {
     el.classList.toggle('active', el.dataset.panel === panel);
   });
   // Show/hide panels
-  const panels = ['home','workbook','variant','batch-analyze','comic','pdf-import','logic','grammar','grammar-quiz','fill-blank'];
+  const panels = ['home','word','translate','workbook','variant','mcq','batch-analyze','comic','pdf-import','logic','grammar','grammar-quiz','fill-blank'];
   panels.forEach(p => {
     const el = document.getElementById('panel-' + p);
     if (el) el.style.display = p === panel ? '' : 'none';
   });
-  // Full-width panels (no split): home / workbook / variant / batch-analyze / comic / pdf-import
-  const fullWidthPanels = ['home','workbook','variant','batch-analyze','comic','pdf-import'];
+  // Full-width panels (no split)
+  const fullWidthPanels = ['home','word','translate','workbook','variant','mcq','batch-analyze','comic','pdf-import'];
   const splitLeft = document.getElementById('splitLeft');
   const splitHandle = document.getElementById('splitHandle');
   const splitRight = document.getElementById('splitRight');
@@ -797,8 +797,11 @@ function switchPanel(panel) {
   const btn = document.getElementById('selBtn');
   const labels = {
     'home': ['', ''],
+    'word': ['', ''],
+    'translate': ['', ''],
     'workbook': ['', ''],
     'variant': ['', ''],
+    'mcq': ['', ''],
     'batch-analyze': ['', ''],
     'comic': ['', ''],
     'pdf-import': ['', ''],
@@ -819,9 +822,12 @@ function switchPanel(panel) {
   // Update title
   const titles = {
     'home': '홈 <span>대시보드</span>',
+    'word': '단어 <span>어휘 정리</span>',
+    'translate': '해석 <span>문단별 번역</span>',
     'workbook': '워크북 <span>문제집 생성</span>',
     'variant': '변형문제 <span>시험지 출제</span>',
-    'batch-analyze': '일괄 <span>꼼꼼분석</span>',
+    'mcq': '기본 <span>객관식</span>',
+    'batch-analyze': '일괄 <span>상세분석</span>',
     'comic': '만화 <span>생성</span>',
     'pdf-import': 'PDF <span>자동 등록</span>',
     'logic': 'Logic Flow <span>Mapper</span>',
@@ -842,6 +848,15 @@ function switchPanel(panel) {
   }
   if (panel === 'pdf-import') {
     if (typeof initPdfImport === 'function') initPdfImport();
+  }
+  if (panel === 'word') {
+    if (typeof initWordTab === 'function') initWordTab();
+  }
+  if (panel === 'translate') {
+    if (typeof initTranslateTab === 'function') initTranslateTab();
+  }
+  if (panel === 'mcq') {
+    if (typeof initMcqTab === 'function') initMcqTab();
   }
 }
 

@@ -160,7 +160,7 @@ async function callClaudeViaApi({ model, system, userMessage }) {
 
 // Windows 의 PowerShell + claude CLI 조합에서 긴 한글 인자가 shell escaping 에서 깨짐.
 // system prompt 는 임시 파일로 전달 (--system-prompt-file) → argument 길이/인코딩 문제 회피
-async function callClaudeViaCli({ model, system, userMessage }) {
+async function callClaudeViaCli({ model, system, userMessage, effort, fast }) {
   const args = [
     '-p',
     '--output-format', 'stream-json',
@@ -176,6 +176,14 @@ async function callClaudeViaCli({ model, system, userMessage }) {
     '--tools='
   ];
 
+  // ── 작업량(effort) / 빠름모드(fast) ──
+  // effort: low|medium|high|xhigh|max (--effort 헤드리스 지원 검증됨)
+  // 빠름모드 ON 이면 effort=low 강제 (헤드리스에 fast mode 직접 토글 부재 → 최저 지연 프리셋)
+  const eff = fast
+    ? 'low'
+    : (effort && /^(low|medium|high|xhigh|max)$/.test(effort) ? effort : null);
+  if (eff) args.push('--effort', eff);
+
   // System prompt → 임시 파일 (Windows 한글 깨짐 회피)
   let tmpSysFile = null;
   if (system && String(system).trim()) {
@@ -184,7 +192,10 @@ async function callClaudeViaCli({ model, system, userMessage }) {
     await fs.promises.writeFile(tmpSysFile, String(system), 'utf8');
     args.push('--system-prompt-file', tmpSysFile);
   }
-  if (model) args.push('--model', model);
+  // 빠름모드: 모델에 fast/1M 변형 시도 (지원 안 돼도 무해 — model 문자열만 echo)
+  let useModel = model;
+  if (fast && useModel && !/\[1m\]$/.test(useModel)) useModel = `${useModel}[1m]`;
+  if (useModel) args.push('--model', useModel);
   args.push(userMessage);
 
   return new Promise((resolve, reject) => {
@@ -261,7 +272,7 @@ async function handleClaude(req, res) {
   try { body = await readJson(req); }
   catch (e) { return sendJson(res, 400, { error: 'invalid JSON: ' + e.message }); }
 
-  const { model, system, userMessage } = body || {};
+  const { model, system, userMessage, effort, fast } = body || {};
   if (!userMessage) return sendJson(res, 400, { error: 'userMessage required' });
 
   const forceCli  = process.env.USE_CLAUDE_CODE === '1';
@@ -271,7 +282,7 @@ async function handleClaude(req, res) {
   try {
     const result = useApiKey
       ? await callClaudeViaApi({ model, system, userMessage })
-      : await callClaudeViaCli({ model, system, userMessage });
+      : await callClaudeViaCli({ model, system, userMessage, effort, fast });
     sendJson(res, 200, result);
   } catch (e) {
     console.error('[api/claude] error:', e.message);

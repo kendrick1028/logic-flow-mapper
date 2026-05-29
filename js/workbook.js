@@ -117,9 +117,12 @@ function initWorkbook() {
         provSel.appendChild(o);
       });
       provSel.addEventListener('change', updateWbModelOptions);
-      updateWbModelOptions();
+      if (typeof selectClaudeDefault === 'function') selectClaudeDefault('wbProvider', updateWbModelOptions);
+      else updateWbModelOptions();
     }
   }
+  if (typeof populateEffortSelect === 'function') populateEffortSelect('wbEffort');
+  if (typeof wireFastToggle === 'function') wireFastToggle('wbFast', 'wbEffort');
 }
 
 function updateWbModelOptions() {
@@ -368,12 +371,14 @@ function startWorkbookJob() {
   const splitMode = document.getElementById('wbSplitMode').value;
   const answerSeparate = document.getElementById('wbAnswerSeparate').checked;
   const answerInline = !answerSeparate;   // 별도 PDF 미체크 시 자동 합본
+  const fast = !!document.getElementById('wbFast')?.checked;
+  const effort = (document.getElementById('wbEffort') || {}).value || DEFAULT_EFFORT;
 
   const job = {
     id: (crypto.randomUUID && crypto.randomUUID()) || `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'workbook',
     items, types,
-    provider, model, splitMode, answerSeparate, answerInline,
+    provider, model, splitMode, answerSeparate, answerInline, effort, fast,
     current: 0,
     done: 0,
     failed: 0,
@@ -476,7 +481,7 @@ async function runWorkbookPipeline(job) {
 async function runWorkbookType(job, item, type, analysis) {
   const sig = job.abortController.signal;
   const prompt = buildWorkbookPrompt(type, analysis);
-  const { parsed } = await callAI(job.provider, job.model, item.passage, prompt, sig, null);
+  const { parsed } = await callAI(job.provider, job.model, item.passage, prompt, sig, null, job.effort, job.fast);
   return parsed;
 }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Logic Flow Mapper</title>
-<link rel="stylesheet" href="css/style.css?v=31">
+<link rel="stylesheet" href="css/style.css?v=32">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -52,50 +52,77 @@
     </button>
   </div>
   <nav class="sidebar-menu">
-    <div class="sidebar-section-label">대시보드</div>
     <button class="sidebar-item" data-panel="home" onclick="switchPanel('home')">
+      <span class="sidebar-abbr">홈</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       <span>홈</span>
     </button>
-    <div class="sidebar-section-label">AI 도구</div>
-    <button class="sidebar-item" data-panel="workbook" onclick="switchPanel('workbook')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-      <span>워크북</span>
-      <span class="sidebar-indicator-dot" id="sidebar-dot-workbook" style="display:none"></span>
+    <div class="sidebar-section-label">주력 도구</div>
+    <button class="sidebar-item" data-panel="word" onclick="switchPanel('word')">
+      <span class="sidebar-abbr">단</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/></svg>
+      <span>단어</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-word" style="display:none"></span>
+    </button>
+    <button class="sidebar-item" data-panel="translate" onclick="switchPanel('translate')">
+      <span class="sidebar-abbr">해</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h10"/><path d="M9 4v4c0 4-2 7-5 8"/><path d="M7 8c0 3 3 5 7 6"/><path d="M14 20l4-9 4 9"/><path d="M15.5 17h5"/></svg>
+      <span>해석</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-translate" style="display:none"></span>
+    </button>
+    <button class="sidebar-item" data-panel="batch-analyze" onclick="switchPanel('batch-analyze')">
+      <span class="sidebar-abbr">상</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>일괄 상세분석</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-batch" style="display:none"></span>
+    </button>
+    <button class="sidebar-item" data-panel="mcq" onclick="switchPanel('mcq')">
+      <span class="sidebar-abbr">객</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      <span>기본 객관식</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-mcq" style="display:none"></span>
     </button>
     <button class="sidebar-item" data-panel="variant" onclick="switchPanel('variant')">
+      <span class="sidebar-abbr">변</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
       <span>변형문제</span>
       <span class="sidebar-indicator-dot" id="sidebar-dot-variant" style="display:none"></span>
     </button>
-    <button class="sidebar-item" data-panel="batch-analyze" onclick="switchPanel('batch-analyze')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-      <span>일괄 꼼꼼분석</span>
-      <span class="sidebar-indicator-dot" id="sidebar-dot-batch" style="display:none"></span>
-    </button>
     <button class="sidebar-item" data-panel="comic" onclick="switchPanel('comic')">
+      <span class="sidebar-abbr">만</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/><circle cx="6.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="6.5" r="1.5" fill="currentColor"/></svg>
       <span>만화 생성</span>
       <span class="sidebar-indicator-dot" id="sidebar-dot-comic" style="display:none"></span>
     </button>
     <button class="sidebar-item" data-panel="pdf-import" onclick="switchPanel('pdf-import')">
+      <span class="sidebar-abbr">+</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
       <span>PDF 자동 등록</span>
     </button>
     <div class="sidebar-section-label">학습 도구</div>
-    <button class="sidebar-item active" data-panel="logic" onclick="switchPanel('logic')">
+    <button class="sidebar-item" data-panel="workbook" onclick="switchPanel('workbook')">
+      <span class="sidebar-abbr">워</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      <span>워크북</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-workbook" style="display:none"></span>
+    </button>
+    <button class="sidebar-item" data-panel="logic" onclick="switchPanel('logic')">
+      <span class="sidebar-abbr">L</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span>Logic Flow</span>
     </button>
     <button class="sidebar-item" data-panel="grammar" onclick="switchPanel('grammar')">
+      <span class="sidebar-abbr">꼼</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       <span>꼼꼼분석</span>
     </button>
     <button class="sidebar-item" data-panel="grammar-quiz" onclick="switchPanel('grammar-quiz')">
+      <span class="sidebar-abbr">법</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
       <span>어법 선택</span>
     </button>
     <button class="sidebar-item" data-panel="fill-blank" onclick="switchPanel('fill-blank')">
+      <span class="sidebar-abbr">빈</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
       <span>빈칸 테스트</span>
     </button>
@@ -231,7 +258,7 @@
             <div class="dash-shortcuts">
               <button class="dash-shortcut" onclick="switchPanel('variant')">변형문제</button>
               <button class="dash-shortcut" onclick="switchPanel('workbook')">워크북</button>
-              <button class="dash-shortcut" onclick="switchPanel('batch-analyze')">일괄 꼼꼼분석</button>
+              <button class="dash-shortcut" onclick="switchPanel('batch-analyze')">일괄 상세분석</button>
               <button class="dash-shortcut" onclick="switchPanel('comic')">만화 생성</button>
             </div>
           </div>
@@ -305,7 +332,7 @@
           <!-- 중앙: AI 옵션 -->
           <div class="panel-split-mid">
             <div class="home-card">
-              <h2 class="home-card-title">일괄 꼼꼼분석</h2>
+              <h2 class="home-card-title">일괄 상세분석</h2>
               <p class="home-card-desc">좌측에서 선택한 지문을 한번에 분석합니다.</p>
               <div class="batch-controls">
                 <div class="batch-row">
@@ -315,6 +342,16 @@
                 <div class="batch-row">
                   <label class="batch-label">AI 모델</label>
                   <select id="batchModel" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="batchEffort" class="form-control"></select>
+                </div>
+                <div class="batch-row batch-row-checkbox">
+                  <label class="batch-checkbox-label">
+                    <input type="checkbox" id="batchFast">
+                    <span>빠름 모드 (속도 우선)</span>
+                  </label>
                 </div>
                 <div class="batch-row batch-row-checkbox">
                   <label class="batch-checkbox-label">
@@ -393,6 +430,16 @@
                   <div class="batch-row">
                     <label class="batch-label">AI 모델</label>
                     <select id="wbModel" class="form-control"></select>
+                  </div>
+                  <div class="batch-row">
+                    <label class="batch-label">작업량</label>
+                    <select id="wbEffort" class="form-control"></select>
+                  </div>
+                  <div class="batch-row batch-row-checkbox">
+                    <label class="batch-checkbox-label">
+                      <input type="checkbox" id="wbFast">
+                      <span>빠름 모드 (속도 우선)</span>
+                    </label>
                   </div>
                   <div class="batch-row">
                     <label class="batch-label">PDF 분할</label>
@@ -527,6 +574,22 @@
                   <label class="batch-label">AI 모델</label>
                   <select id="varModel" class="form-control"></select>
                 </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="varEffort" class="form-control"></select>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">빠름 모드</div>
+                      <div class="option-toggle-desc">속도 우선(작업량 낮음 고정 + 품질검토 생략)</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="varFast">
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
                 <div class="option-toggle-row single">
                   <div class="option-toggle">
                     <div class="option-toggle-info">
@@ -607,6 +670,216 @@
               <!-- 다운로드 버튼 (진행 상황 카드 내부에 통합, 완료 시 표시) -->
               <div class="downloads-inline" id="varDownloadsCard" style="display:none">
                 <div class="downloads-body" id="varDownloadArea"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 기본 객관식 Panel (변형문제 파이프라인 재사용 · 고정 설정) -->
+      <div class="panel" id="panel-mcq" style="display:none">
+        <div class="panel-split">
+          <div class="panel-split-left">
+            <div class="home-card range-card">
+              <h2 class="home-card-title">범위 선택</h2>
+              <div class="range-tree" id="mcqRangeTree"></div>
+              <div class="range-summary" id="mcqRangeSummary">선택된 지문: 0개</div>
+            </div>
+          </div>
+          <div class="panel-split-mid">
+            <div class="home-card scroll-card options-card">
+              <h2 class="home-card-title">출제 옵션</h2>
+              <p class="home-card-desc">수능 기본 객관식 5종(내용일치·순서·삭제·문장삽입·제목/주제/목적/요약/주장)을 고정 출제합니다. 지문 변형 없음.</p>
+              <div class="scroll-card-body">
+                <div class="batch-row">
+                  <label class="batch-label">시험지 제목</label>
+                  <input type="text" id="mcqPaperTitle" class="form-control" placeholder="기본 객관식" maxlength="60">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">부제목</label>
+                  <input type="text" id="mcqPaperSubtitle" class="form-control" placeholder="(자동: 교재·단원·문항 수)" maxlength="120">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">객관식 개수</label>
+                  <input type="number" id="mcqObj" class="form-control" value="100" min="0">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">주관식 개수</label>
+                  <input type="number" id="mcqSub" class="form-control" value="0" min="0">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">난이도</label>
+                  <select id="mcqDiff" class="form-control">
+                    <option value="low">하</option>
+                    <option value="mid" selected>중</option>
+                    <option value="high">상 (수능 최고난도)</option>
+                  </select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 프로바이더</label>
+                  <select id="mcqProvider" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 모델</label>
+                  <select id="mcqModel" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="mcqEffort" class="form-control"></select>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">빠름 모드</div>
+                      <div class="option-toggle-desc">속도 우선(작업량 낮음 고정)</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="mcqFast"><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">시험지 표지 생성</div>
+                      <div class="option-toggle-desc">첫 페이지에 시험 제목·범위·날짜 표지 생성</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="mcqIncludeCover" checked><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">해설지 별도 PDF</div>
+                      <div class="option-toggle-desc">체크 시 문제지와 해설지를 별도 파일로</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="mcqAnswerSeparate" checked><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+              </div>
+              <div class="sticky-actions">
+                <button class="btn-analyze" id="mcqStartBtn" onclick="startMcqJob()">기본 객관식 생성</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-split-right">
+            <div class="job-switcher" id="mcqJobSwitcher" style="display:none"></div>
+            <div class="home-card progress-card" id="mcqProgressCard">
+              <div class="progress-card-header">
+                <h2 class="home-card-title">진행 상황</h2>
+                <button class="btn-cancel-inline" id="mcqCancelBtn" onclick="cancelMcqJob()" style="visibility:hidden">중단</button>
+              </div>
+              <div class="progress-card-body" id="mcqProgressBody"></div>
+              <div class="empty-state" id="mcqEmptyState">진행 중인 작업이 없습니다</div>
+              <div class="downloads-inline" id="mcqDownloadsCard" style="display:none">
+                <div class="downloads-body" id="mcqDownloadArea"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 단어 Panel (어휘 전용 일괄) -->
+      <div class="panel" id="panel-word" style="display:none">
+        <div class="panel-split">
+          <div class="panel-split-left">
+            <div class="home-card range-card">
+              <h2 class="home-card-title">범위 선택</h2>
+              <div class="range-tree" id="wordRangeTree"></div>
+              <div class="range-summary" id="wordRangeSummary">선택된 지문: 0개</div>
+            </div>
+          </div>
+          <div class="panel-split-mid">
+            <div class="home-card">
+              <h2 class="home-card-title">단어 정리</h2>
+              <p class="home-card-desc">선택한 지문의 핵심 어휘만 추출해 정리합니다.</p>
+              <div class="batch-controls">
+                <div class="batch-row">
+                  <label class="batch-label">AI 프로바이더</label>
+                  <select id="wordProvider" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 모델</label>
+                  <select id="wordModel" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="wordEffort" class="form-control"></select>
+                </div>
+                <div class="batch-row batch-row-checkbox">
+                  <label class="batch-checkbox-label"><input type="checkbox" id="wordFast"><span>빠름 모드 (속도 우선)</span></label>
+                </div>
+                <div class="batch-row batch-row-checkbox">
+                  <label class="batch-checkbox-label"><input type="checkbox" id="wordForce"><span>이미 정리된 지문도 다시 생성</span></label>
+                </div>
+                <div class="batch-actions">
+                  <button class="btn-analyze" id="wordStartBtn" onclick="startWordJob()">단어 정리 시작</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-split-right">
+            <div class="job-switcher" id="wordJobSwitcher" style="display:none"></div>
+            <div class="home-card progress-card" id="wordProgressCard">
+              <div class="progress-card-header">
+                <h2 class="home-card-title">진행 상황</h2>
+                <button class="btn-cancel-inline" id="wordCancelBtn" onclick="cancelWordJob()" style="visibility:hidden">중단</button>
+              </div>
+              <div class="progress-card-body" id="wordProgressBody"></div>
+              <div class="empty-state" id="wordEmptyState">진행 중인 작업이 없습니다</div>
+              <div class="downloads-inline" id="wordDownloadsCard" style="display:none">
+                <div class="downloads-body" id="wordDownloadArea"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 해석 Panel (문단별 번역 일괄) -->
+      <div class="panel" id="panel-translate" style="display:none">
+        <div class="panel-split">
+          <div class="panel-split-left">
+            <div class="home-card range-card">
+              <h2 class="home-card-title">범위 선택</h2>
+              <div class="range-tree" id="transRangeTree"></div>
+              <div class="range-summary" id="transRangeSummary">선택된 지문: 0개</div>
+            </div>
+          </div>
+          <div class="panel-split-mid">
+            <div class="home-card">
+              <h2 class="home-card-title">해석 생성</h2>
+              <p class="home-card-desc">선택한 지문을 문단별로 문장 번호를 매겨 영어 원문 + 한글 해석으로 정리합니다.</p>
+              <div class="batch-controls">
+                <div class="batch-row">
+                  <label class="batch-label">AI 프로바이더</label>
+                  <select id="transProvider" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 모델</label>
+                  <select id="transModel" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="transEffort" class="form-control"></select>
+                </div>
+                <div class="batch-row batch-row-checkbox">
+                  <label class="batch-checkbox-label"><input type="checkbox" id="transFast"><span>빠름 모드 (속도 우선)</span></label>
+                </div>
+                <div class="batch-actions">
+                  <button class="btn-analyze" id="transStartBtn" onclick="startTranslateJob()">해석 생성 시작</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-split-right">
+            <div class="job-switcher" id="transJobSwitcher" style="display:none"></div>
+            <div class="home-card progress-card" id="transProgressCard">
+              <div class="progress-card-header">
+                <h2 class="home-card-title">진행 상황</h2>
+                <button class="btn-cancel-inline" id="transCancelBtn" onclick="cancelTranslateJob()" style="visibility:hidden">중단</button>
+              </div>
+              <div class="progress-card-body" id="transProgressBody"></div>
+              <div class="empty-state" id="transEmptyState">진행 중인 작업이 없습니다</div>
+              <div class="downloads-inline" id="transDownloadsCard" style="display:none">
+                <div class="downloads-body" id="transDownloadArea"></div>
               </div>
             </div>
           </div>
@@ -892,15 +1165,17 @@
 <script src="js/db-readingmaster.js?v=1"></script>
 <script src="js/db-hackers.js?v=2"></script>
 <script src="js/db-ted.js?v=1"></script>
-<script src="js/api.js?v=33"></script>
+<script src="js/api.js?v=34"></script>
 <script src="js/progress-checklist.js?v=2"></script>
-<script src="js/job-manager.js?v=3"></script>
-<script src="js/app.js?v=39"></script>
-<script src="js/batch.js?v=20"></script>
+<script src="js/job-manager.js?v=4"></script>
+<script src="js/app.js?v=40"></script>
+<script src="js/batch.js?v=21"></script>
 <script src="js/range-tree.js?v=3"></script>
 <script src="js/pdf-export.js?v=4"></script>
-<script src="js/workbook.js?v=6"></script>
-<script src="js/variant.js?v=12"></script>
+<script src="js/workbook.js?v=7"></script>
+<script src="js/variant.js?v=13"></script>
+<script src="js/word-tab.js?v=1"></script>
+<script src="js/translate-tab.js?v=1"></script>
 <script src="js/comic-generation.js?v=1"></script>
 <script src="js/dashboard.js?v=3"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>

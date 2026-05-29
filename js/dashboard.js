@@ -273,7 +273,7 @@ function renderJobsCard() {
     const done = batchJob.done || 0;
     const cur = batchJob.queue && batchJob.current < batchJob.queue.length ? batchJob.queue[batchJob.current] : null;
     activeJobs.push({
-      kind: '일괄 꼼꼼분석',
+      kind: '일괄 상세분석',
       total, done,
       pct: total ? Math.round(done / total * 100) : 0,
       label: `${done}/${total}` + (batchJob.failed ? ` · 실패 ${batchJob.failed}` : ''),

@@ -93,6 +93,24 @@ const VOCABULARY_PROMPT = `당신은 수능/내신 영어 어휘 학습에 특�
 - antonyms: **가능한 한 모든 단어에 1~2개**. 정말 반의어 개념이 없는 단어(고유명사, 단순 명사 등)만 빈 배열.
 - isStarred: 시험에 빈출 / 학생이 외워둘 가치가 높은 단어면 true. 보통 단어는 false. (전체의 30~50% 정도가 true)`;
 
+// ── 해석 (문단별 문장 번역) ──
+// 입력 지문을 문단 단위로 나누고, 각 문장에 연속 번호를 매겨 영어 원문 + 자연스러운 한국어 해석.
+const TRANSLATION_PROMPT = `당신은 수능/내신 영어 지문 해석 전문가입니다. 주어진 영어 지문을 문단별로 정리하여 JSON 으로만 응답하세요.
+
+규칙:
+- 원문의 문단 구분(줄바꿈)을 유지하여 paragraphs 배열로 나눈다. 줄바꿈이 없으면 의미 단위로 1~3개 문단으로 적절히 나눈다.
+- 각 문장에 지문 전체 기준 연속된 번호(id)를 1부터 부여 (문단이 바뀌어도 이어서 증가).
+- en 은 원문 문장 그대로(수정·생략 금지), ko 는 자연스럽고 정확한 한국어 해석.
+- 문장 분리는 마침표/물음표/느낌표 기준. 약어(Mr., U.S. 등)는 한 문장으로 유지.
+
+반드시 JSON 형식으로만 응답. 다른 텍스트 금지:
+{
+  "paragraphs": [
+    { "sentences": [ {"id": 1, "en": "원문 문장", "ko": "한국어 해석"}, {"id": 2, "en": "...", "ko": "..."} ] },
+    { "sentences": [ {"id": 3, "en": "...", "ko": "..."} ] }
+  ]
+}`;
+
 // ── 한국어 제목만 생성 (titleKo 누락 시 부분 재생성용) ──
 const TITLE_ONLY_PROMPT = `다음 영어 지문의 핵심 내용을 한 줄로 요약하는 한국어 제목을 만들어 주세요.
 
@@ -542,16 +560,21 @@ stem 예시: "윗글의 내용으로 보아 밑줄 친 _____가 의미하는 바
 [필수] 객관식 choices 5개는 모두 영어 문장/구/절로 작성할 것. 한국어 선지 금지.`,
 
   '내용일치/불일치': VAR_HEADER + `
-유형: [내용 일치/불일치] — 지문 내용과 일치 또는 일치하지 않는 선택지 고르기.
+유형: [내용 일치/불일치] — 수능 26·45번 형식. 지문 내용과 일치 또는 일치하지 않는 선택지 고르기.
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.
-stem 예시: "윗글의 내용과 일치하지 않는 것은?"
-[필수] 객관식 choices 5개는 모두 영어 문장으로 작성할 것. 한국어 선지 금지.`,
+stem 예시: "윗글의 내용과 일치하지 않는 것은?" (또는 인물/대상 소개 글이면 "<대상>에 관한 윗글의 내용과 일치하지 않는 것은?")
+[필수] 객관식 choices 5개는 모두 **한국어 평서문**으로 작성할 것 (수능 26·45번은 한글 선지). 영어 선지 금지.
+- 각 선지는 지문의 서로 다른 부분에 근거하며, 본문 등장 순서대로 배열.
+- 정답(틀린 선지) 1개는 본문 정보와 미묘하게 어긋나게(숫자/대상/인과 뒤바꿈) 작성.
+markedPassage 는 원문 그대로(마킹 불필요).`,
 
   '밑줄함의/지칭추론': VAR_HEADER + `
-유형: [밑줄 함의 / 지칭 추론] — 지문 내 특정 표현(밑줄)이 의미하는 바 또는 지칭 대상 찾기.
+유형: [밑줄 함의] — 수능 21번 형식. 지문 내 특정 표현(밑줄)이 문맥상 의미하는 바 찾기.
+markedPassage: 원문 전문에서 함축적 의미를 가진 구절 하나에 <u>...</u> 밑줄.
 passageRef 에 밑줄 대상 표현을 정확히 적어두세요.
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.
-stem 예시: "밑줄 친 ____가 윗글에서 의미하는 바로 가장 적절한 것은?"`,
+stem 예시: "밑줄 친 <밑줄표현>가 다음 글에서 의미하는 바로 가장 적절한 것은?"
+[필수] choices 5개는 모두 **영어 구/절/문장**. 밑줄의 비유적 의미를 해석한 것이어야 하며, 표면적 직역 오답을 섞을 것.`,
 
   '분위기/어조/심경': VAR_HEADER + `
 유형: [분위기/어조/심경 변화] — 글 전체 또는 등장인물의 심경/어조/분위기 파악.
@@ -559,15 +582,17 @@ stem 예시: "밑줄 친 ____가 윗글에서 의미하는 바로 가장 적절�
 선택지는 한국어 형용사 2~3개 조합 (예: "unhappy → relieved")으로 구성.`,
 
   '순서': VAR_HEADER + `
-유형: [글의 순서] — 주어진 글 다음에 이어질 (A), (B), (C) 세 단락의 올바른 순서 고르기 (수능형).
+유형: [글의 순서] — 수능 36·37번 형식. 주어진 글 다음에 이어질 (A), (B), (C) 세 단락의 올바른 순서 고르기.
 객관식 규칙:
-  - markedPassage 는 "주어진 글 → (A) → (B) → (C)" 형태로 구성.
-    * 원문을 4개 덩어리로 분할: 첫 단락(주어진 글)은 그대로 두고, 나머지 본문을 (A)/(B)/(C) 세 덩어리로 나눠 각각 앞에 "(A) ", "(B) ", "(C) " 라벨을 붙인다.
-    * 본문 내 (A)(B)(C) 단락은 정답 순서가 아닌 **뒤섞인 순서**로 제시해야 함(예: 실제 정답이 (B)-(A)-(C) 이면 본문에는 그대로 뒤섞어 배열).
-  - choices 5개는 "(A) - (C) - (B)" 형식의 순서 조합 5종 (수능 표준 배열).
-  - answer 는 "①"~"⑤" 기호 중 하나.
-  - stem 예시: "주어진 글 다음에 이어질 글의 순서로 가장 적절한 것은?"
-주관식은 정답 순서를 직접 한글/기호로 서술.
+  - markedPassage 구조:
+      주어진 글(도입부) 원문 1덩어리
+      (A) ... / (B) ... / (C) ...  (나머지 본문을 의미 단위 3덩어리로 나눠 각 앞에 "(A)","(B)","(C)" 라벨)
+    * 본문 내 (A)(B)(C) 는 정답 순서가 아닌 **뒤섞인 순서**로 제시 (지시어·연결어로 순서 단서를 남길 것).
+    * 각 라벨은 <b>(A)</b> 처럼 굵게, 단락 앞에 배치.
+  - choices 5개는 **수능 표준 5배열 고정**: ① (A)-(C)-(B)  ② (B)-(A)-(C)  ③ (B)-(C)-(A)  ④ (C)-(A)-(B)  ⑤ (C)-(B)-(A)
+  - answer 는 정답 순서에 해당하는 "①"~"⑤" 기호.
+  - stem: "주어진 글 다음에 이어질 글의 순서로 가장 적절한 것은?"
+주관식은 정답 순서를 기호로 서술.
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '연결어': VAR_HEADER + `
@@ -583,32 +608,30 @@ stem 예시: "밑줄 친 ____가 윗글에서 의미하는 바로 가장 적절�
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '문장삽입': VAR_HEADER + `
-유형: [문장 삽입] — 주어진 한 문장이 지문의 ①~⑤ 다섯 위치 중 어디에 들어갈지 고르기 (수능형).
+유형: [문장 삽입] — 수능 38·39번 형식. 주어진 한 문장이 지문의 ①~⑤ 위치 중 어디에 들어갈지 고르기.
 객관식 규칙:
-  - 먼저 원문에서 논리 연결이 강한(지시어/연결어/대명사로 앞뒤가 맞물리는) 문장 하나를 **발췌**하여 "보기 문장" 으로 삼는다.
+  - 원문에서 지시어/연결어/대명사로 앞뒤가 강하게 맞물리는 문장 하나를 **발췌**해 "주어진 문장" 으로 삼는다.
   - markedPassage 구조:
-      [보기 문장 영문]
-      ① 첫 번째 후보 지점 전 문장   ② 두 번째 후보 지점 전 문장   ③ ...   ④ ...   ⑤ ...
-    * 발췌한 보기 문장을 본문에서 제거한 뒤, 그 자리 포함 5개 후보 위치에 **①②③④⑤ 기호**를 삽입.
-    * 보기 문장은 markedPassage 최상단에 한 줄로 먼저 제시하고, 이어서 본문 전체를 이어 쓴다.
-    * 본문 내 ①~⑤ 기호는 문장 사이 공백 위치에 배치 (예: "This is …. ① However, it …. ② But …"). 총 5개 모두 등장해야 함.
-  - choices 5개는 ["①","②","③","④","⑤"] 로 고정(선지 본문 없음 — passage 내 기호가 선지 역할).
-  - answer 는 "①"~"⑤" 중 보기 문장이 들어갈 정답 위치.
-  - stem 예시: "글의 흐름으로 보아, 주어진 문장이 들어가기에 가장 적절한 곳은?"
-주관식은 보기 문장의 삽입 위치를 번호(①~⑤)로 답하게 한다.
+      [주어진 문장 영문]  ← 최상단 한 줄(박스처럼 먼저 제시)
+      (이어서) 본문 전체 — 발췌 문장을 제거한 뒤, 문장 사이 5개 후보 자리에 ( ① ) ( ② ) ( ③ ) ( ④ ) ( ⑤ ) 기호를 순서대로 삽입.
+    * ①~⑤ 모두 등장해야 하며, 정답 위치가 발췌 원위치와 일치.
+  - choices 5개는 ["①","②","③","④","⑤"] 로 고정.
+  - answer 는 정답 위치 "①"~"⑤".
+  - stem: "글의 흐름으로 보아, 주어진 문장이 들어가기에 가장 적절한 곳은?"
+주관식은 삽입 위치 번호(①~⑤)를 답하게 한다.
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '삭제': VAR_HEADER + `
-유형: [흐름상 어색한 문장 삭제] — 지문 내 ①~⑤ 다섯 문장 중 전체 흐름과 무관한 문장 고르기 (수능형).
+유형: [무관한 문장] — 수능 35번 형식. 전체 흐름과 관계 없는 문장 고르기.
 객관식 규칙:
-  - markedPassage 는 도입부(주제문) 뒤에 본문 **5개 문장**을 "① ... ② ... ③ ... ④ ... ⑤ ..." 기호와 함께 차례로 제시.
+  - markedPassage 는 도입부(주제문) 1~2문장 뒤에 본문 **5개 문장**을 "① ... ② ... ③ ... ④ ... ⑤ ..." 기호와 함께 차례로 제시.
     * ①~⑤ 기호는 각 문장의 **앞**에 놓고, 다섯 문장 모두 순서대로 등장.
-    * 다섯 문장 중 **정확히 하나**는 같은 키워드를 사용하되 주제·논점에서 벗어나는 문장으로 변형/대체 (원문의 완전히 다른 소재를 끼워넣는다).
-    * 나머지 네 문장은 원문 흐름을 유지.
+    * 다섯 문장 중 **정확히 하나**는 글의 핵심 키워드는 공유하되 주제·논지에서 벗어나는 문장(세부 소재가 어긋남)으로 작성.
+    * 나머지 네 문장은 자연스러운 흐름을 유지.
   - choices 5개는 ["①","②","③","④","⑤"] 로 고정.
-  - answer 는 "①"~"⑤" 중 어색한 문장 기호.
-  - stem 예시: "다음 글에서 전체 흐름과 관계 없는 문장은?"
-주관식은 어색한 문장의 번호를 답하고 이유를 한국어로 서술하게 한다.
+  - answer 는 무관한 문장 기호 "①"~"⑤".
+  - stem: "다음 글에서 전체 흐름과 관계 없는 문장은?"
+주관식은 무관한 문장 번호 + 이유를 한국어로 서술.
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '빈칸추론': VAR_HEADER + `
@@ -626,19 +649,30 @@ explanation: 왜 정답이 적절한지 + 왜 다른 선지가 오답인지 한�
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '어법': VAR_HEADER + `
-유형: [어법] — 지문 내 밑줄 친 어법 포인트 5개 중 어색한 것 고르기 (수능형).
-passageRef 에 어법 판단 대상 5개 표현을 "① to make, ② making, ③ ..." 형식으로 정리.
-출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.
-stem 예시: "(A), (B), (C)의 각 네모 안에서 어법에 맞는 표현으로 가장 적절한 것은?" 또는 "밑줄 친 부분 중, 어법상 틀린 것은?"`,
+유형: [어법] — 수능 29번 형식. 밑줄 친 부분 중 어법상 틀린 것 고르기.
+객관식 규칙:
+  - markedPassage 는 원문 전문에서 어법 판단 대상 5곳에 <u>①&nbsp;portion</u>, <u>②&nbsp;portion</u>, ... <u>⑤&nbsp;portion</u> 형식으로 밑줄(번호는 밑줄 안 맨 앞).
+    * 대상은 동사형/준동사/관계사/수일치/병렬/대명사 등 수능 빈출 어법 포인트.
+    * 정확히 1곳을 어법상 **틀리게** 변형(예: 분사↔동사, 관계사 what↔that, 단수↔복수), 나머지 4곳은 옳게 유지.
+  - choices 5개는 ["①","②","③","④","⑤"] 로 고정(밑줄이 선지 역할).
+  - answer 는 틀린 곳 기호.
+  - stem: "다음 글의 밑줄 친 부분 중, 어법상 틀린 것은?"
+explanation 에 각 밑줄의 어법 포인트와 정답 근거를 한국어로 설명.
+출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '어휘/영영풀이': VAR_HEADER + `
-유형: [어휘 / 영영풀이] — 지문의 문맥에 맞지 않는 어휘 찾기 또는 영영풀이에 해당하는 단어 찾기.
-출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.
-stem 예시: "(A), (B), (C)의 각 네모 안에서 문맥에 맞는 낱말로 가장 적절한 것은?"`,
+유형: [어휘] — 수능 30번 형식. 밑줄 친 낱말 중 문맥상 쓰임이 적절하지 않은 것 고르기.
+객관식 규칙:
+  - markedPassage 는 원문 전문에서 문맥 핵심 낱말 5곳에 <u>①&nbsp;word</u>, ... <u>⑤&nbsp;word</u> 밑줄.
+    * 정확히 1곳을 문맥상 **반대/부적절한 낱말**로 치환(예: increase↔decrease, similar↔different), 나머지 4곳은 적절히 유지.
+  - choices 5개는 ["①","②","③","④","⑤"] 로 고정.
+  - answer 는 부적절한 낱말 기호.
+  - stem: "다음 글의 밑줄 친 부분 중, 문맥상 낱말의 쓰임이 적절하지 않은 것은?"
+출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.`,
 
   '제목/주제/목적/요약/주장': VAR_HEADER + `
-유형: [제목 / 주제 / 목적 / 요약문 완성 / 필자의 주장] — 지문의 대의 파악.
-객관식 문항은 영어 명사구/문장 형태의 선택지.
+유형: [대의 파악] — 제목 / 주제 / 목적 / 요약문 완성 / 필자의 주장 중 하나.
+*** 중요: 아래 "하위유형 지정" 블록이 주어지면 그 하위유형 1종만 출제하고, 발문·선지 언어 규격을 정확히 따를 것. 지정이 없으면 제목/주제/목적/요약/주장을 고르게 섞어 출제. ***
 출제 수: 객관식 OBJ_COUNT_PLACEHOLDER개, 주관식 SUB_COUNT_PLACEHOLDER개.
 주관식은 한국어 요지 서술(한 문장) 또는 영어 요약문 완성(빈칸).`,
 
@@ -898,6 +932,48 @@ const AI_MODEL_OPTIONS = {
   'gpt-5.4-nano': ['high', 'medium', 'low']
 };
 
+// ── 작업량(effort) 레벨 — Claude CLI --effort 로 전달 ──
+// low|medium|high|xhigh|max (Claude Code 헤드리스 --effort 지원)
+const EFFORT_LEVELS = [
+  { id: 'low', label: '낮음 (빠름)' },
+  { id: 'medium', label: '보통' },
+  { id: 'high', label: '높음' },
+  { id: 'xhigh', label: '매우 높음' },
+  { id: 'max', label: '최대 (최고 품질)' }
+];
+const DEFAULT_EFFORT = 'high';
+
+// 패널 작업량/빠름모드 컨트롤 채우기 헬퍼 — selectId 에 EFFORT_LEVELS 옵션 주입
+function populateEffortSelect(selectId, defaultEffort) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  sel.innerHTML = '';
+  EFFORT_LEVELS.forEach(e => {
+    const o = document.createElement('option');
+    o.value = e.id; o.textContent = e.label;
+    if (e.id === (defaultEffort || DEFAULT_EFFORT)) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+// 빠름모드 토글 ↔ 작업량 select 연동 (빠름 ON 이면 작업량 비활성)
+function wireFastToggle(fastId, effortId) {
+  const fast = document.getElementById(fastId);
+  const eff = document.getElementById(effortId);
+  if (!fast || !eff) return;
+  const sync = () => { eff.disabled = fast.checked; eff.style.opacity = fast.checked ? '0.45' : ''; };
+  fast.addEventListener('change', sync);
+  sync();
+}
+
+// provider select 를 Claude 기본으로 설정(옵션에 claude 있을 때) 후 모델 갱신 콜백 호출
+function selectClaudeDefault(provSelId, onChange) {
+  const sel = document.getElementById(provSelId);
+  if (!sel) { if (typeof onChange === 'function') onChange(); return; }
+  if (Array.from(sel.options).some(o => o.value === 'claude')) sel.value = 'claude';
+  if (typeof onChange === 'function') onChange();
+}
+
 // 요청 타임아웃(ms): 이 시간 내에 응답이 없으면 강제 중단
 // 토큰 기반 어법 분석은 출력이 길어 5분까지 허용
 const REQUEST_TIMEOUT_MS = 300000;
@@ -1110,14 +1186,14 @@ function splitIntoSentences(text) {
 
 // 어법 분석 — 한 지문 → 문장별 병렬 호출 + 실패 문장 자동 재시도
 //   1차 병렬 분석 → 실패한 문장만 모아 재시도 (최대 3차, 2초 간격 백오프)
-async function callGrammarChunked(provider, model, passage, externalSignal, option) {
+async function callGrammarChunked(provider, model, passage, externalSignal, option, effort, fast) {
   const sentences = splitIntoSentences(passage);
   if (!sentences.length) return { parsed: { sentences: [] }, usage: null };
 
   // 단일 문장 분석 — 성공 시 {sentence,usage}, 실패 시 throw
   const analyzeOne = async (sentText, id) => {
     const userMsg = `[입력 문장 — id=${id}]\n${sentText}\n\n위 문장(id=${id})을 분석하여 JSON 객체 1개만 출력. id 필드는 반드시 ${id}.`;
-    const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, externalSignal, option);
+    const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, externalSignal, option, effort, fast);
     let s = null;
     if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) s = r.parsed.sentences[0];
     else if (r.parsed && r.parsed.id != null) s = r.parsed;
@@ -1207,7 +1283,7 @@ function normalizeUsage(u) {
   return { input_tokens, output_tokens, cached_tokens };
 }
 
-async function callAI(provider, model, passage, systemPrompt, signal, option) {
+async function callAI(provider, model, passage, systemPrompt, signal, option, effort, fast) {
   const sysPrompt = systemPrompt || SYSTEM_PROMPT;
   const userMsg = `다음 영어 지문을 분석하세요:\n\n${passage}`;
 
@@ -1215,13 +1291,14 @@ async function callAI(provider, model, passage, systemPrompt, signal, option) {
   const modelInfo = AI_MODELS.find(m => m.id === model);
   const prov = modelInfo ? modelInfo.provider : 'gemini';
 
-  if (prov === 'claude') return callClaudeProxy(model, userMsg, sysPrompt, signal, option);
+  if (prov === 'claude') return callClaudeProxy(model, userMsg, sysPrompt, signal, option, effort, fast);
   if (prov === 'openai') return callOpenAI(model, userMsg, sysPrompt, signal, option);
   return callGemini(nextGeminiKey(), model || GEMINI_MODEL, userMsg, sysPrompt, signal);
 }
 
 // ── Claude API (Vercel Serverless 프록시) ──
-async function callClaudeProxy(model, userMsg, sysPrompt, externalSignal, option) {
+// effort: low|medium|high|xhigh|max (작업량), fast: 빠름모드 (둘 다 server.js → claude CLI --effort 로 전달)
+async function callClaudeProxy(model, userMsg, sysPrompt, externalSignal, option, effort, fast) {
   // 동시 호출 제한 — 8개씩 처리, 나머지는 대기열
   // (취소 신호는 대기 중에도 빠져나갈 수 있게 수동으로 체크)
   if (externalSignal && externalSignal.aborted) throw new Error('분석이 취소되었습니다.');
@@ -1243,7 +1320,7 @@ async function callClaudeProxy(model, userMsg, sysPrompt, externalSignal, option
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal,
-      body: JSON.stringify({ model, system: sysPrompt, userMessage: userMsg, option: option || undefined })
+      body: JSON.stringify({ model, system: sysPrompt, userMessage: userMsg, option: option || undefined, effort: effort || undefined, fast: fast || undefined })
     });
     const data = await res.json();
     if (!res.ok) {

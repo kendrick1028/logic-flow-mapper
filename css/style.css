@@ -124,6 +124,10 @@ input.form-control[type=number]::-webkit-inner-spin-button{-webkit-appearance:no
 .sidebar-item svg{width:17px;height:17px;flex-shrink:0}
 .sidebar:not(.expanded) .sidebar-item{padding:0;justify-content:center}
 .sidebar:not(.expanded) .sidebar-item span{display:none}
+/* 접힘 상태: 아이콘 숨기고 단일 한글자(약어) 표시 */
+.sidebar-abbr{display:none;font-weight:800;font-size:16px;line-height:1;flex-shrink:0;width:20px;text-align:center;color:inherit}
+.sidebar:not(.expanded) .sidebar-item svg{display:none}
+.sidebar:not(.expanded) .sidebar-item .sidebar-abbr{display:block}
 .sidebar-footer{padding:10px;border-top:1px solid var(--c-line-soft)}
 
 /* ── Main Content (사이드바는 항상 64px 영역만 차지, expanded 는 오버레이) ── */

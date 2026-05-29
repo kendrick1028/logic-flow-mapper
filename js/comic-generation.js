@@ -124,7 +124,8 @@ function initComic() {
         provSel.appendChild(o);
       });
       provSel.addEventListener('change', updateComicModelOptions);
-      updateComicModelOptions();
+      if (typeof selectClaudeDefault === 'function') selectClaudeDefault('comicProvider', updateComicModelOptions);
+      else updateComicModelOptions();
     }
   }
 

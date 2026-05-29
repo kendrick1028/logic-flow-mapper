@@ -8,6 +8,19 @@
 // 모든 helper 함수는 job 을 첫 번째 인자로 받아 해당 job 의 상태만 조작함.
 
 let variantJobManager = null;   // JobManager 인스턴스. initVariant() 에서 생성.
+let mcqJobManager = null;       // 기본 객관식 탭 전용 JobManager. initMcqTab() 에서 생성.
+
+// job 의 uiPrefix 에 따라 알맞은 JobManager / DOM / 표기를 반환 (변형문제 ↔ 기본 객관식 공용 파이프라인)
+function jobUiCtx(job) {
+  const isMcq = job && job.uiPrefix === 'mcq';
+  return {
+    mgr: isMcq ? mcqJobManager : variantJobManager,
+    bodyId: isMcq ? 'mcqProgressBody' : 'varProgressBody',
+    cancelId: isMcq ? 'mcqCancelBtn' : 'varCancelBtn',
+    headWord: isMcq ? '기본 객관식' : '변형문제',
+    panelKey: isMcq ? 'mcq' : 'variant'
+  };
+}
 
 // ── Firestore 데이터 전처리: undefined 재귀 제거 ──
 // AI 응답에 포함된 undefined 필드는 Firestore set/arrayUnion 을 거부시키므로 저장 전에 strip.
@@ -97,7 +110,7 @@ function estimateTokens(text) {
 async function callAITracked(job, provider, model, userMsg, systemPrompt, signal, option) {
   const estIn = estimateTokens(userMsg) + estimateTokens(systemPrompt);
   try {
-    const { parsed, usage } = await callAI(provider, model, userMsg, systemPrompt, signal, option);
+    const { parsed, usage } = await callAI(provider, model, userMsg, systemPrompt, signal, option, job && job.effort, job && job.fast);
     const inTokens = (usage && usage.input_tokens) ? usage.input_tokens : estIn;
     const outTokens = (usage && usage.output_tokens) ? usage.output_tokens : estimateTokens(JSON.stringify(parsed || ''));
     const cachedTokens = (usage && usage.cached_tokens) ? usage.cached_tokens : 0;
@@ -360,9 +373,12 @@ function initVariant() {
         provSel.appendChild(o);
       });
       provSel.addEventListener('change', updateVarModelOptions);
-      updateVarModelOptions();
+      if (typeof selectClaudeDefault === 'function') selectClaudeDefault('varProvider', updateVarModelOptions);
+      else updateVarModelOptions();
     }
   }
+  if (typeof populateEffortSelect === 'function') populateEffortSelect('varEffort');
+  if (typeof wireFastToggle === 'function') wireFastToggle('varFast', 'varEffort');
 
   // 초기 호출: 총문항/객관식/주관식 검증 상태 표시
   onVariantCountsChange();
@@ -616,6 +632,10 @@ const TYPE_PRIORITY_WEIGHTS = {
 
 const LOW_PRIORITY_TYPES = new Set(['내용유추', '내용일치/불일치']);
 const CORE_TYPES = new Set(['순서', '연결어', '문장삽입', '삭제', '빈칸추론', '어법']);
+
+// 대의파악 합성유형 — 하위유형을 균등 분배 (제목만 나오던 버그 수정)
+const DAEUI_TYPE = '제목/주제/목적/요약/주장';
+const DAEUI_SUBTYPES = ['제목', '주제', '목적', '요약', '주장'];
 
 function distributeQuota(totalObj, totalSub, typesSel) {
   const quota = {};
@@ -1031,11 +1051,14 @@ function assignTypesToPassages(assignments, quotaPerType, meta, items) {
   const itemMap = {};
   items.forEach(it => { itemMap[keyOf(it)] = it; });
 
-  // demand flat list
+  // demand flat list — 대의파악 합성유형은 하위유형(제목/주제/목적/요약/주장) 라운드로빈 균등 분배
   const typeDemand = [];
+  let daeuiIdx = 0;
+  const nextSub = () => DAEUI_SUBTYPES[daeuiIdx++ % DAEUI_SUBTYPES.length];
   Object.entries(quotaPerType).forEach(([type, q]) => {
-    for (let i = 0; i < (q.obj || 0); i++) typeDemand.push({ type, format: 'obj' });
-    for (let i = 0; i < (q.sub || 0); i++) typeDemand.push({ type, format: 'sub' });
+    const isDaeui = (type === DAEUI_TYPE);
+    for (let i = 0; i < (q.obj || 0); i++) typeDemand.push({ type, format: 'obj', subtype: isDaeui ? nextSub() : null });
+    for (let i = 0; i < (q.sub || 0); i++) typeDemand.push({ type, format: 'sub', subtype: isDaeui ? nextSub() : null });
   });
 
   // 유형별로 적합도 높은 지문에 할당 — 항상 1문제 = 1태스크 (완전 병렬)
@@ -1058,7 +1081,7 @@ function assignTypesToPassages(assignments, quotaPerType, meta, items) {
     const passage = itemMap[chosen.k];
     // 1문제 = 1태스크 (묶지 않음 → 완전 병렬 실행)
     tasks.push({
-      type: d.type, passage,
+      type: d.type, subtype: d.subtype || null, passage,
       thisObj: d.format === 'obj' ? 1 : 0,
       thisSub: d.format === 'sub' ? 1 : 0
     });
@@ -1933,7 +1956,10 @@ function startVariantJob() {
   const intent = intentEl ? (intentEl.value || '').trim() : '';
   const variation = (document.getElementById('varVariation') || {}).value || 'none';
   const showVariationBadge = (document.getElementById('varShowVariationBadge') || {}).checked || false;
-  const qualityReview = (document.getElementById('varQualityReview') || {}).checked || false;
+  const fast = !!(document.getElementById('varFast') || {}).checked;
+  const effort = (document.getElementById('varEffort') || {}).value || DEFAULT_EFFORT;
+  // 빠름모드면 품질검토 스킵 (속도 우선)
+  const qualityReview = !fast && ((document.getElementById('varQualityReview') || {}).checked || false);
   const includeCover = (document.getElementById('varIncludeCover') || {}).checked || false;
   const studentName = ((document.getElementById('varStudentName') || {}).value || '').trim();
   const studentWeakness = ((document.getElementById('varStudentWeakness') || {}).value || '').trim();
@@ -1965,6 +1991,7 @@ function startVariantJob() {
     excludePrev, provider, model, answerSeparate, answerInline,
     variation, showVariationBadge, qualityReview, includeCover,
     studentName, studentWeakness, paperTitle, paperSubtitle,
+    effort, fast,
     _meta: {},
     _plannedAssignments: null,
     _reviews: null,
@@ -1999,6 +2026,143 @@ function startVariantJob() {
   job._timerInterval = setInterval(() => tickVariantTimer(job), 1000);
 
   // 비동기 파이프라인 — job 참조 캡처, 완료 후 finishVariantJob(job) 자동 호출
+  runVariantPipeline(job).finally(() => {
+    if (typeof updateSidebarIndicators === 'function') updateSidebarIndicators();
+  });
+}
+
+// ══════════════════════════════════════
+// 기본 객관식 탭 — 변형문제 파이프라인 재사용(고정 설정)
+// ══════════════════════════════════════
+const MCQ_FIXED_TYPES = ['내용일치/불일치', '순서', '삭제', '문장삽입', '제목/주제/목적/요약/주장'];
+
+function initMcqTab() {
+  const tree = document.getElementById('mcqRangeTree');
+  if (!tree || typeof BOOKS === 'undefined') return;
+
+  if (!mcqJobManager && typeof JobManager !== 'undefined') {
+    mcqJobManager = new JobManager({
+      featureKey: 'mcq',
+      switcherId: 'mcqJobSwitcher',
+      progressBodyId: 'mcqProgressBody',
+      downloadCardId: 'mcqDownloadsCard',
+      downloadAreaId: 'mcqDownloadArea',
+      cancelBtnId: 'mcqCancelBtn',
+      emptyStateId: 'mcqEmptyState',
+      labelFn: (job) => {
+        const title = job.paperTitle || '기본 객관식';
+        const progress = computeOverallPct(job);
+        const status = job._cancelled || job.phase === 'cancelled' ? '중단' :
+                       job.phase === 'done' ? '완료' : `${progress}%`;
+        return `${title} (${status})`;
+      },
+      renderFn: (job) => { updateVarUI(job); },
+      onRemove: (job) => {
+        if (job._timerInterval) { clearInterval(job._timerInterval); job._timerInterval = null; }
+      }
+    });
+    if (typeof window !== 'undefined') {
+      window._jobManagers = window._jobManagers || {};
+      window._jobManagers.mcq = mcqJobManager;
+    }
+    mcqJobManager.renderSelected();
+  }
+
+  initRangeTree(tree, updateMcqRangeSummary);
+  updateMcqRangeSummary();
+
+  if (typeof AI_MODELS !== 'undefined') {
+    const provSel = document.getElementById('mcqProvider');
+    const modelSel = document.getElementById('mcqModel');
+    if (provSel && modelSel) {
+      const provLabels = { gemini: 'Gemini', claude: 'Claude', openai: 'OpenAI' };
+      const providers = [...new Set(AI_MODELS.map(m => m.provider))];
+      provSel.innerHTML = '';
+      providers.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = provLabels[p] || p;
+        provSel.appendChild(o);
+      });
+      provSel.addEventListener('change', updateMcqModelOptions);
+      if (typeof selectClaudeDefault === 'function') selectClaudeDefault('mcqProvider', updateMcqModelOptions);
+      else updateMcqModelOptions();
+    }
+  }
+  if (typeof populateEffortSelect === 'function') populateEffortSelect('mcqEffort');
+  if (typeof wireFastToggle === 'function') wireFastToggle('mcqFast', 'mcqEffort');
+}
+
+function updateMcqModelOptions() {
+  const provider = document.getElementById('mcqProvider').value;
+  const modelSel = document.getElementById('mcqModel');
+  modelSel.innerHTML = '';
+  AI_MODELS.filter(m => m.provider === provider).forEach(m => {
+    const o = document.createElement('option');
+    o.value = m.id; o.textContent = m.label;
+    modelSel.appendChild(o);
+  });
+}
+
+function updateMcqRangeSummary() {
+  const el = document.getElementById('mcqRangeSummary');
+  const tree = document.getElementById('mcqRangeTree');
+  if (!el || !tree) return;
+  const n = (typeof getRangeSelectionCount === 'function') ? getRangeSelectionCount(tree) : 0;
+  el.textContent = `선택된 지문: ${n}개`;
+}
+
+function startMcqJob() {
+  const tree = document.getElementById('mcqRangeTree');
+  const items = getRangeSelection(tree);
+  const objN = parseInt(document.getElementById('mcqObj').value || '0', 10);
+  const subN = parseInt(document.getElementById('mcqSub').value || '0', 10);
+  const totalQ = objN + subN;
+  const diff = document.getElementById('mcqDiff').value;
+  const provider = document.getElementById('mcqProvider').value;
+  const model = document.getElementById('mcqModel').value;
+  const answerSeparate = !!(document.getElementById('mcqAnswerSeparate') || {}).checked;
+  const includeCover = !!(document.getElementById('mcqIncludeCover') || {}).checked;
+  const fast = !!(document.getElementById('mcqFast') || {}).checked;
+  const effort = (document.getElementById('mcqEffort') || {}).value || DEFAULT_EFFORT;
+  const paperTitle = ((document.getElementById('mcqPaperTitle') || {}).value || '').trim();
+  const paperSubtitle = ((document.getElementById('mcqPaperSubtitle') || {}).value || '').trim();
+
+  if (!items.length) { alert('지문을 한 개 이상 선택해주세요.'); return; }
+  if (totalQ <= 0) { alert('객관식 + 주관식 개수를 입력해주세요.'); return; }
+
+  const phaseStates = {
+    prepare: 'active', scorePassages: 'pending', loadPrev: 'pending',
+    generate: 'pending', buildPdf: 'pending', done: 'pending'
+  };
+
+  const job = {
+    id: (crypto.randomUUID && crypto.randomUUID()) || `mcq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'variant',
+    uiPrefix: 'mcq',
+    items, totalQ, objN, subN, diff,
+    typesSel: MCQ_FIXED_TYPES.slice(),
+    intent: '',
+    excludePrev: false,
+    provider, model, answerSeparate, answerInline: !answerSeparate,
+    variation: 'none', showVariationBadge: false, qualityReview: false, includeCover,
+    studentName: '', studentWeakness: '',
+    paperTitle: paperTitle || '기본 객관식',
+    paperSubtitle,
+    effort, fast,
+    _meta: {}, _plannedAssignments: null, _reviews: null, _apiBudgetReached: false,
+    _tokens: { input: 0, output: 0 }, _phaseProgress: {}, _phaseDetails: {},
+    _startedAt: Date.now(), _timerInterval: null, _finalCostLine: '', _summaryAi: null,
+    _downloadsHtml: '', _bindDownloads: null,
+    generated: [], reusedFromCache: [],
+    abortController: new AbortController(),
+    currentLabel: '', totalSteps: 0, doneSteps: 0,
+    phase: 'prepare', phaseStates, subLabel: '준비 중...', _currentItem: null
+  };
+
+  if (mcqJobManager) mcqJobManager.addJob(job);
+  if (typeof setPanelRunning === 'function') setPanelRunning('mcq', true);
+  updateVarUI(job, '준비 중...');
+  job._timerInterval = setInterval(() => tickVariantTimer(job), 1000);
   runVariantPipeline(job).finally(() => {
     if (typeof updateSidebarIndicators === 'function') updateSidebarIndicators();
   });
@@ -2151,7 +2315,7 @@ async function runVariantPipeline(job) {
 
     // ── Phase 5: generate ──
     await runWithConcurrency(job, taskQueue, VARIANT_AI_CONCURRENCY, async (task) => {
-      const { type, passage: p, thisObj, thisSub } = task;
+      const { type, subtype, passage: p, thisObj, thisSub } = task;
       const sig = job.abortController.signal;
       if (sig.aborted) throw new Error('aborted');
 
@@ -2169,7 +2333,7 @@ async function runVariantPipeline(job) {
       const combinedIntent = (job.studentWeakness
         ? `${intent}\n[학생 취약점: ${job.studentWeakness}] — 이 취약점을 겨냥한 문항으로 출제해주세요.`
         : intent);
-      const prompt = buildVariantPrompt(type, diff, analysis, thisObj, thisSub, combinedIntent);
+      const prompt = buildVariantPrompt(type, diff, analysis, thisObj, thisSub, combinedIntent, subtype);
 
       let result = null, lastErr = null;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -2199,6 +2363,7 @@ async function runVariantPipeline(job) {
       const stamped = qs.map(q => Object.assign({}, q, {
         id: (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         type,
+        subtype: subtype || null,
         book: p.book,
         unit: p.unit,
         num: p.num,
@@ -2328,7 +2493,22 @@ function groupByType(list) {
   return out;
 }
 
-function buildVariantPrompt(type, diff, analysis, objCount, subCount, intent) {
+// 대의파악 합성유형의 하위유형별 수능 발문/선지 규격
+const DAEUI_SUBTYPE_SPEC = {
+  '제목': `[이 문항은 반드시 "제목" 유형] — stem: "다음 글의 제목으로 가장 적절한 것은?"
+  choices 5개는 모두 **영어 제목(명사구/짧은 문장)**. 글 전체를 함축하는 함축적·비유적 제목. markedPassage 는 원문 그대로(마킹 불필요).`,
+  '주제': `[이 문항은 반드시 "주제" 유형] — stem: "다음 글의 주제로 가장 적절한 것은?"
+  choices 5개는 모두 **영어 명사구**(예: "the importance of ~", "ways to ~"). 글의 중심 소재+핵심 견해를 담을 것. markedPassage 는 원문 그대로.`,
+  '목적': `[이 문항은 반드시 "목적" 유형] — stem: "다음 글의 목적으로 가장 적절한 것은?"
+  choices 5개는 모두 **한국어** ("~하려고", "~을 안내하려고", "~을 요청하려고" 형식). 글쓴이의 집필 목적을 묻는다. markedPassage 는 원문 그대로.`,
+  '요약': `[이 문항은 반드시 "요약문 완성" 유형] — stem: "다음 글의 내용을 한 문장으로 요약하고자 한다. 빈칸 (A), (B)에 들어갈 말로 가장 적절한 것은?"
+  markedPassage: 원문 전문 끝에 줄바꿈 후 한 문장 요약문을 두고, 그 안 두 핵심 어휘를 (A)/(B) 빈칸 "_______(A)_______", "_______(B)_______" 으로 표시.
+  choices 5개는 모두 **"(A) word …… (B) word"** 형식 영어 단어 쌍. 정답 쌍 외 4개는 의미상 매력적 오답.`,
+  '주장': `[이 문항은 반드시 "필자의 주장" 유형] — stem: "다음 글에서 필자가 주장하는 바로 가장 적절한 것은?"
+  choices 5개는 모두 **한국어 평서문**(예: "~해야 한다.", "~할 필요가 있다."). 필자가 강하게 내세우는 주장을 고른다. markedPassage 는 원문 그대로.`
+};
+
+function buildVariantPrompt(type, diff, analysis, objCount, subCount, intent, subtype) {
   const diffMap = { low: '쉬움', mid: '보통', high: '어려움(수능 최고난도)' };
   const ctx = analysis ? `\n[참고 분석 컨텍스트]\n${JSON.stringify({
     meta: analysis.meta || null,
@@ -2336,10 +2516,14 @@ function buildVariantPrompt(type, diff, analysis, objCount, subCount, intent) {
     vocab: analysis.vocab || null
   }, null, 1)}\n\n` : '';
   const tpl = VAR_PROMPTS[type] || VAR_PROMPTS['내용유추'];
-  const base = ctx + tpl
+  let base = ctx + tpl
     .replace(/DIFFICULTY_PLACEHOLDER/g, diffMap[diff] || '보통')
     .replace(/OBJ_COUNT_PLACEHOLDER/g, String(objCount))
     .replace(/SUB_COUNT_PLACEHOLDER/g, String(subCount));
+  // 대의파악 하위유형 지정 — 이 문항이 어떤 하위유형인지 명확히 고정
+  if (subtype && DAEUI_SUBTYPE_SPEC[subtype]) {
+    base += `\n\n════════ 하위유형 지정 ════════\n${DAEUI_SUBTYPE_SPEC[subtype]}\n다른 하위유형으로 출제하지 말 것.`;
+  }
   if (intent && intent.trim()) {
     return base + `\n\n[출제 의도 / 추가 요청]\n${intent.trim()}\n위 요청에 중점을 두어 문항을 출제해주세요.\n`;
   }
@@ -2358,14 +2542,15 @@ function updateVarUI(job, label) {
     job.subLabel = label;
   }
 
+  const ctx = jobUiCtx(job);
   // 선택되지 않은 job 은 state 만 갱신, DOM 렌더 스킵
-  if (variantJobManager && variantJobManager.selectedId !== job.id) {
+  if (ctx.mgr && ctx.mgr.selectedId !== job.id) {
     // 드롭다운 label 변경 반영 — in-place 업데이트 (열려있는 드롭다운 안 닫힘)
-    if (variantJobManager) variantJobManager._updateSwitcherLabels();
+    ctx.mgr._updateSwitcherLabels();
     return;
   }
 
-  const body = document.getElementById('varProgressBody');
+  const body = document.getElementById(ctx.bodyId);
   if (!body || typeof renderJobChecklist !== 'function') return;
 
   const done = job.doneSteps || 0;
@@ -2406,10 +2591,10 @@ function updateVarUI(job, label) {
   const costKrw = computeCostKrw(tokens, job.model);
 
   // headTitle: phase 상태에 따라 동적 결정
-  let headTitle = '변형문제 생성 중';
-  if (job.phase === 'cancelled') headTitle = '변형문제 — 중단됨';
-  else if (job.phase === 'done') headTitle = '변형문제 — 완료';
-  else if (job.phase === 'failed') headTitle = '변형문제 — 실패';
+  let headTitle = `${ctx.headWord} 생성 중`;
+  if (job.phase === 'cancelled') headTitle = `${ctx.headWord} — 중단됨`;
+  else if (job.phase === 'done') headTitle = `${ctx.headWord} — 완료`;
+  else if (job.phase === 'failed') headTitle = `${ctx.headWord} — 실패`;
 
   renderJobChecklist(body, {
     headTitle,
@@ -2429,15 +2614,15 @@ function updateVarUI(job, label) {
   });
 
   // 다운로드 영역 / 취소 버튼 상태는 JobManager 가 관리
-  if (variantJobManager) {
-    const cancelBtn = document.getElementById('varCancelBtn');
+  if (ctx.mgr) {
+    const cancelBtn = document.getElementById(ctx.cancelId);
     if (cancelBtn) {
       // 레이아웃 시프트 방지 — display 대신 visibility 사용
-      cancelBtn.style.visibility = variantJobManager.isJobRunning(job) ? 'visible' : 'hidden';
+      cancelBtn.style.visibility = ctx.mgr.isJobRunning(job) ? 'visible' : 'hidden';
       cancelBtn.style.display = '';
     }
     // 드롭다운 라벨 갱신 (% 변화 반영) — in-place 업데이트 (드롭다운 안 닫힘)
-    variantJobManager._updateSwitcherLabels();
+    ctx.mgr._updateSwitcherLabels();
   }
 }
 
@@ -2456,6 +2641,15 @@ function cancelVariantJob(jobId) {
   if (job && job.abortController) {
     job.abortController.abort();
   }
+}
+
+// 기본 객관식 탭 취소 (mcqJobManager 대상)
+function cancelMcqJob(jobId) {
+  if (!mcqJobManager) return;
+  const targetId = jobId || mcqJobManager.selectedId;
+  if (!targetId) return;
+  const job = mcqJobManager.getJob(targetId);
+  if (job && job.abortController) job.abortController.abort();
 }
 
 async function finishVariantJob(job) {
@@ -2515,15 +2709,16 @@ async function finishVariantJob(job) {
   }
 
   // Manager 업데이트 (running count 변화 → 사이드바 인디케이터)
-  if (variantJobManager) {
-    variantJobManager.notifyPhaseChanged(job.id);
+  const _ctx = jobUiCtx(job);
+  if (_ctx.mgr) {
+    _ctx.mgr.notifyPhaseChanged(job.id);
   }
 
   // 대시보드 완료 작업 등록
   if (typeof dashboardRegisterCompleted === 'function') {
     try {
       dashboardRegisterCompleted({
-        kind: '변형문제 생성',
+        kind: _ctx.headWord + ' 생성',
         title,
         summary,
         status: aborted ? 'aborted' : 'done',

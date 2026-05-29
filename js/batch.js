@@ -76,8 +76,11 @@ function initBatch() {
       batchProvider.appendChild(o);
     });
     batchProvider.addEventListener('change', updateBatchModels);
-    updateBatchModels();
+    if (typeof selectClaudeDefault === 'function') selectClaudeDefault('batchProvider', updateBatchModels);
+    else updateBatchModels();
   }
+  if (typeof populateEffortSelect === 'function') populateEffortSelect('batchEffort');
+  if (typeof wireFastToggle === 'function') wireFastToggle('batchFast', 'batchEffort');
 
   // Load saved overview on init
   loadSavedOverview();
@@ -112,6 +115,8 @@ function startBatchJob() {
   const provider = document.getElementById('batchProvider').value;
   const model = document.getElementById('batchModel').value;
   const forceReanalyze = !!document.getElementById('batchForceReanalyze')?.checked;
+  const fast = !!document.getElementById('batchFast')?.checked;
+  const effort = (document.getElementById('batchEffort') || {}).value || DEFAULT_EFFORT;
 
   const queue = selections;  // [{book, unit, num, passage}]
 
@@ -129,6 +134,8 @@ function startBatchJob() {
     provider,
     model,
     option: null,
+    effort,
+    fast,
     forceReanalyze,
     phase: 'prepare',
     phaseStates: { prepare: 'active', running: 'pending', buildPdf: 'pending', done: 'pending' },
@@ -241,6 +248,8 @@ async function tryPartialRetry(item, existing, job) {
   const provider = job.provider;
   const model = job.model;
   const option = job.option;
+  const effort = job.effort;
+  const fast = job.fast;
 
   // ── 무엇이 누락됐는지 판단 ──
   const docId = `${item.book}__${item.unit}__${item.num}`;
@@ -289,7 +298,7 @@ async function tryPartialRetry(item, existing, job) {
   // Logic Flow (전체 재생성) — needsLogic 일 때
   let logicPromise = Promise.resolve({ status: 'skipped', value: existing.logic });
   if (needsLogic) {
-    logicPromise = retryWithBackoff(() => callAI(provider, model, passage, null, sig, option), sig)
+    logicPromise = retryWithBackoff(() => callAI(provider, model, passage, null, sig, option, effort, fast), sig)
       .then(r => ({ status: 'fulfilled', value: r.parsed }))
       .catch(e => ({ status: 'rejected', reason: e }));
   }
@@ -298,7 +307,7 @@ async function tryPartialRetry(item, existing, job) {
   // titleKo 만 따로 채우기 (Logic Flow 본문은 있는데 titleKo 만 빈 경우)
   let titleOnlyPromise = Promise.resolve({ status: 'skipped', value: null });
   if (needsTitleOnly && typeof TITLE_ONLY_PROMPT !== 'undefined') {
-    titleOnlyPromise = retryWithBackoff(() => callAI(provider, model, passage, TITLE_ONLY_PROMPT, sig, option), sig)
+    titleOnlyPromise = retryWithBackoff(() => callAI(provider, model, passage, TITLE_ONLY_PROMPT, sig, option, effort, fast), sig)
       .then(r => ({ status: 'fulfilled', value: (r && r.parsed && r.parsed.titleKo) || '' }))
       .catch(e => ({ status: 'rejected', reason: e }));
   }
@@ -307,7 +316,7 @@ async function tryPartialRetry(item, existing, job) {
   // Vocabulary
   let vocabPromise = Promise.resolve({ status: 'skipped', value: existing.vocab });
   if (needsVocab && typeof VOCABULARY_PROMPT !== 'undefined') {
-    vocabPromise = retryWithBackoff(() => callAI(provider, model, passage, VOCABULARY_PROMPT, sig, option), sig)
+    vocabPromise = retryWithBackoff(() => callAI(provider, model, passage, VOCABULARY_PROMPT, sig, option, effort, fast), sig)
       .then(r => ({ status: 'fulfilled', value: r.parsed }))
       .catch(e => ({ status: 'rejected', reason: e }));
   }
@@ -315,7 +324,7 @@ async function tryPartialRetry(item, existing, job) {
 
   // Grammar — 미분석 문장만, 자체 재시도 로직 사용
   const grammarPromise = (missingIds.length > 0)
-    ? retryMissingSentences(missingIds, expectedSentences, provider, model, option, sig)
+    ? retryMissingSentences(missingIds, expectedSentences, provider, model, option, sig, effort, fast)
     : Promise.resolve([]);
   tasks.push(grammarPromise);
 
@@ -368,14 +377,14 @@ async function tryPartialRetry(item, existing, job) {
 }
 
 // 미분석 문장 ID 모음을 받아 병렬 분석 + 자체 재시도
-async function retryMissingSentences(ids, expectedSentences, provider, model, option, sig) {
+async function retryMissingSentences(ids, expectedSentences, provider, model, option, sig, effort, fast) {
   let pending = ids.map(id => ({ id, text: expectedSentences[id - 1] }));
   const succeeded = [];
   const MAX = 3;
   for (let attempt = 1; attempt <= MAX && pending.length > 0; attempt++) {
     if (sig.aborted) break;
     if (attempt > 1) await new Promise(r => setTimeout(r, attempt === 2 ? 2000 : 5000));
-    const settled = await Promise.allSettled(pending.map(p => analyzeOneSentenceBatch(provider, model, p.text, p.id, sig, option)));
+    const settled = await Promise.allSettled(pending.map(p => analyzeOneSentenceBatch(provider, model, p.text, p.id, sig, option, effort, fast)));
     const fail = [];
     settled.forEach((s, k) => {
       const p = pending[k];
@@ -403,9 +412,9 @@ async function retryWithBackoff(fn, sig) {
 }
 
 // 한 문장만 분석 호출 (batch 컨텍스트용)
-async function analyzeOneSentenceBatch(provider, model, sentText, id, sig, option) {
+async function analyzeOneSentenceBatch(provider, model, sentText, id, sig, option, effort, fast) {
   const userMsg = `[입력 문장 — id=${id}]\n${sentText}\n\n위 문장(id=${id})을 분석하여 JSON 객체 1개만 출력. id 필드는 반드시 ${id}.`;
-  const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, sig, option);
+  const r = await callAI(provider, model, sentText, GRAMMAR_PER_SENTENCE_PROMPT, sig, option, effort, fast);
   let newS = null;
   if (r.parsed && Array.isArray(r.parsed.sentences) && r.parsed.sentences.length) newS = r.parsed.sentences[0];
   else if (r.parsed && r.parsed.id != null) newS = r.parsed;
@@ -420,13 +429,15 @@ async function runSinglePassageAnalysis(item, job) {
   const provider = job.provider;
   const model = job.model;
   const option = job.option;
+  const effort = job.effort;
+  const fast = job.fast;
 
   // 3개 영역 (Logic Flow / Vocab / Grammar) 병렬 호출. 메타·지문구조 제거됨.
   // 어법은 문장 단위 분할 병렬 호출 (timeout 회피).
   const [logicR, vocabR, grammarR] = await Promise.allSettled([
-    callAI(provider, model, item.passage, null, sig, option),
-    callAI(provider, model, item.passage, VOCABULARY_PROMPT, sig, option),
-    callGrammarChunked(provider, model, item.passage, sig, option)
+    callAI(provider, model, item.passage, null, sig, option, effort, fast),
+    callAI(provider, model, item.passage, VOCABULARY_PROMPT, sig, option, effort, fast),
+    callGrammarChunked(provider, model, item.passage, sig, option, effort, fast)
   ]);
 
   // 실제 API 응답의 usage 누적 (없으면 무시)
@@ -885,10 +896,10 @@ function updateBatchUI(job) {
     return { book: it.book, unit: it.unit, num: it.num, status };
   });
 
-  let headTitle = '일괄 꼼꼼분석 중';
-  if (job.phase === 'cancelled') headTitle = '일괄 꼼꼼분석 — 중단됨';
-  else if (job.phase === 'done') headTitle = '일괄 꼼꼼분석 — 완료';
-  else if (job.phase === 'failed') headTitle = '일괄 꼼꼼분석 — 실패';
+  let headTitle = '일괄 상세분석 중';
+  if (job.phase === 'cancelled') headTitle = '일괄 상세분석 — 중단됨';
+  else if (job.phase === 'done') headTitle = '일괄 상세분석 — 완료';
+  else if (job.phase === 'failed') headTitle = '일괄 상세분석 — 실패';
 
   // 경과 시간 + 토큰 사용량 + 원화 비용
   const elapsedMs = job._startedAt ? (Date.now() - job._startedAt) : 0;
@@ -942,7 +953,7 @@ function updateBatchUI(job) {
     stats: { total, done: done - skipped, failed, skipped },
     phases: [
       { id: 'prepare', label: '범위 확정 및 큐 구성' },
-      { id: 'running', label: 'AI 꼼꼼분석 실행', desc: `${done + failed} / ${total} 처리 · Firestore 자동 저장` },
+      { id: 'running', label: 'AI 상세분석 실행', desc: `${done + failed} / ${total} 처리 · Firestore 자동 저장` },
       { id: 'buildPdf', label: 'PDF 빌드', desc: job._pdfBuildDesc || '' },
       { id: 'done', label: '완료' }
     ],
@@ -982,7 +993,7 @@ async function finishBatchJob(job) {
     job._timerInterval = null;
   }
 
-  let title = '일괄 꼼꼼분석';
+  let title = '일괄 상세분석';
   let summary = '';
 
   const { done, failed, skipped, total, queue } = job;
@@ -1055,10 +1066,10 @@ async function finishBatchJob(job) {
       const filenameBase = (() => {
         const books = [...new Set(Object.values(job.resultData || {}).map(d => d.item.book))];
         const prefix = books.length === 1 ? books[0] : `${books.length}개교재`;
-        return `꼼꼼분석_${prefix.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+        return `상세분석_${prefix.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
       })();
       let dlHtml = '<div class="wb-download-row">';
-      dlHtml += `<button class="wb-download-btn" data-role="batch-dl-pdf">꼼꼼분석 PDF 다운로드 (${passageCount}개 지문)</button>`;
+      dlHtml += `<button class="wb-download-btn" data-role="batch-dl-pdf">상세분석 PDF 다운로드 (${passageCount}개 지문)</button>`;
       dlHtml += '</div>';
       job._downloadsHtml = dlHtml;
       job._pdfFilename = filenameBase;
@@ -1074,7 +1085,7 @@ async function finishBatchJob(job) {
               pdf.save(filenameBase);
               btn.textContent = `다운로드 완료!`;
               setTimeout(() => {
-                btn.textContent = `꼼꼼분석 PDF 다운로드 (${passageCount}개 지문)`;
+                btn.textContent = `상세분석 PDF 다운로드 (${passageCount}개 지문)`;
                 btn.disabled = false;
               }, 2000);
             } else {
@@ -1085,7 +1096,7 @@ async function finishBatchJob(job) {
             console.warn('[batch] PDF build failed:', e.message);
             btn.textContent = `PDF 생성 실패: ${e.message}`;
             setTimeout(() => {
-              btn.textContent = `꼼꼼분석 PDF 다운로드 (${passageCount}개 지문)`;
+              btn.textContent = `상세분석 PDF 다운로드 (${passageCount}개 지문)`;
               btn.disabled = false;
             }, 3000);
           }
@@ -1112,7 +1123,7 @@ async function finishBatchJob(job) {
   if (typeof dashboardRegisterCompleted === 'function') {
     try {
       dashboardRegisterCompleted({
-        kind: '일괄 꼼꼼분석',
+        kind: '일괄 상세분석',
         title,
         summary,
         status: wasAborted ? 'aborted' : 'done',
