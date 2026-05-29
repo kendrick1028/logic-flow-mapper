@@ -1046,6 +1046,7 @@ function updateApiModeBadge(source, meta) {
 // 앱 시작 시 한 번 — /api/claude 가벼운 프로브로 모드 표시
 // (Claude 분석 안 돌려도 헤더에 배지 즉시 보이도록)
 async function probeApiMode() {
+  let pingOk = false;
   try {
     const res = await fetch(PROXY_BASE + '/api/claude', {
       method: 'POST',
@@ -1053,12 +1054,19 @@ async function probeApiMode() {
       body: JSON.stringify({ userMessage: 'ping' })
     });
     const data = await res.json().catch(() => ({}));
-    if (res.ok) updateApiModeBadge(data.source || 'unknown', { apiKeySource: data.apiKeySource });
+    if (res.ok) { pingOk = true; updateApiModeBadge(data.source || 'unknown', { apiKeySource: data.apiKeySource }); }
     else updateApiModeBadge(data.source || 'error', { error: data.error, hint: data.hint });
   } catch (e) {
     updateApiModeBadge('error', { error: e.message });
   }
-  // 인증 상태에 따라 "Claude 연결" 버튼 표시 토글
+  // 핑이 200 으로 성공 = Claude 작동/인증 확정 → 연결 버튼 숨기고 추가 인증 spawn 생략.
+  // (인증 상태 확인을 매번 별도로 spawn 하면 콜드 스타트 시 타임아웃나서 버튼이 잘못 뜨던 문제 해결)
+  if (pingOk) {
+    const b = document.getElementById('claudeConnectBtn');
+    if (b) b.style.display = 'none';
+    return;
+  }
+  // 핑 실패 시에만 인증 상태 확인 → 연결 버튼 표시 여부 결정
   await refreshClaudeConnectButton();
 }
 window.addEventListener('load', () => { setTimeout(probeApiMode, 800); });
@@ -1072,17 +1080,15 @@ async function refreshClaudeConnectButton() {
   try {
     const res = await fetch(PROXY_BASE + '/api/claude-auth?action=status');
     const data = await res.json();
-    if (data.status === 'ok') {
-      btn.style.display = 'none';
-    } else {
+    if (data.status === 'not_logged_in' || data.status === 'not_installed') {
+      // 확정적인 미연결 상태일 때만 버튼 표시
       btn.style.display = '';
       btn.classList.remove('connecting');
       const lbl = document.getElementById('claudeConnectLabel');
-      if (lbl) {
-        if (data.status === 'not_installed') lbl.textContent = 'Claude CLI 설치 필요';
-        else if (data.status === 'not_logged_in') lbl.textContent = '🔌 Claude 연결';
-        else lbl.textContent = '🔌 Claude 연결';
-      }
+      if (lbl) lbl.textContent = (data.status === 'not_installed') ? 'Claude CLI 설치 필요' : '🔌 Claude 연결';
+    } else {
+      // ok / timeout / error 등 — 일시적 상태는 버튼 숨김 (false positive 방지)
+      btn.style.display = 'none';
     }
   } catch (e) {
     // 백엔드 다운 등 — 버튼 숨김
