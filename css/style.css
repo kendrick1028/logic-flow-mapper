@@ -128,6 +128,20 @@ input.form-control[type=number]::-webkit-inner-spin-button{-webkit-appearance:no
 .sidebar-abbr{display:none;font-weight:800;font-size:16px;line-height:1;flex-shrink:0;width:20px;text-align:center;color:inherit}
 .sidebar:not(.expanded) .sidebar-item svg{display:none}
 .sidebar:not(.expanded) .sidebar-item .sidebar-abbr{display:block}
+
+/* ── 어휘 문제: 단어장 선택기 ── */
+.vq-bank-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 2px}
+.vq-bank-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid #e7ebf5;border-radius:9px;cursor:pointer;transition:all .15s;background:#fff}
+.vq-bank-item:hover{border-color:#c3cef5;background:#fafbff}
+.vq-bank-item.active{border-color:var(--c-primary);background:var(--c-primary-50)}
+.vq-bank-item input[type=checkbox]{width:15px;height:15px;flex-shrink:0;accent-color:var(--c-primary)}
+.vq-bank-item .vq-bank-name{font-size:13px;font-weight:700;color:var(--c-ink);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vq-bank-item .vq-bank-count{font-size:11px;font-weight:700;color:var(--c-primary);background:var(--c-primary-50);padding:2px 8px;border-radius:999px;flex-shrink:0}
+.vq-bank-empty{padding:24px 12px;text-align:center;color:var(--c-ink-4);font-size:12.5px}
+.vq-bank-actions{display:flex;gap:6px;margin-top:10px;flex-shrink:0}
+.vq-bank-btn{flex:1;padding:8px 6px;font-size:12px;font-weight:700;border:1px solid #e3e8f5;border-radius:8px;background:#fff;color:#4b5468;cursor:pointer;transition:all .15s;font-family:inherit}
+.vq-bank-btn:hover{border-color:var(--c-primary);color:var(--c-primary);background:var(--c-primary-50)}
+.vq-bank-btn.danger:hover{border-color:#e04a4a;color:#e04a4a;background:#fff2f2}
 .sidebar-footer{padding:10px;border-top:1px solid var(--c-line-soft)}
 
 /* ── Main Content (사이드바는 항상 64px 영역만 차지, expanded 는 오버레이) ── */

@@ -773,6 +773,97 @@ answer: 영작 문장 + 채점 포인트.
 - 여러 문항이면 A~F 중 서로 다른 패턴을 선택해 다양성 확보.`
 };
 
+// ══════════════════════════════════════════════════════════════
+// 어휘 문제(Vocab Quiz) 프롬프트 — 단어장(지문과 별개)에서 예문·문제 생성
+// ══════════════════════════════════════════════════════════════
+const VOCAB_QUIZ_HEADER = `당신은 대한민국 수능·내신 영어 어휘 문제 출제 전문가입니다.
+입력으로 영어 단어 목록(JSON, 각 {word, meaningKo})이 주어집니다. 이 단어들을 사용해 예문을 만들고 어휘 문제를 출제하세요.
+난이도: DIFFICULTY_PLACEHOLDER. 반드시 JSON 형식으로만 응답하세요.
+
+[규칙]
+- 객관식 5지선다(①②③④⑤), 정답 1개, 오답은 매력적이되 논리적으로 배제 가능해야 함.
+- 예문은 단어의 의미가 명확히 드러나는 자연스러운 영어 문장(수능 수준).
+- markedPassage/choices 의 HTML 은 아래 허용 태그만: <u>, <b>, <strong>, <em>, <br>, <sub>, <sup>, &nbsp;, ①②③④⑤. 그 외 금지.
+- 해설(explanation)은 한국어로 정답 근거 + 오답 이유를 상세히.
+
+공통 출력 스키마:
+{
+  "questions": [
+    {
+      "type": "...",
+      "format": "obj",
+      "stem": "발문(한국어)",
+      "markedPassage": "<문항 본문 HTML — 유형별 구성 준수>",
+      "choices": ["①...","②...","③...","④...","⑤..."],
+      "answer": "③",
+      "explanation": "해설(한국어)"
+    }
+  ]
+}
+`;
+
+const VOCAB_QUIZ_PROMPTS = {
+  'vocab-usage': VOCAB_QUIZ_HEADER + `
+유형: [밑줄 친 단어의 쓰임이 어색한 문장 고르기]
+- 주어진 단어 5개로 각각 예문 1개씩(총 5문장)을 만든다. 각 문장에서 해당 단어를 <u>단어</u> 로 밑줄.
+- 정확히 1문장은 그 단어를 **문맥상 어색하게(의미가 안 맞게)** 사용하고, 나머지 4문장은 자연스럽게 사용.
+- markedPassage 는 빈 문자열 "" (선지에 문장이 들어감).
+- choices 5개 = 각 예문 문장 전체("①  Example sentence with <u>word</u>." 형식, ①~⑤ 번호를 문장 앞에).
+- answer = 어색하게 쓰인 문장의 번호(①~⑤).
+- stem: "다음 중 밑줄 친 단어의 쓰임이 어색한 문장을 고르시오."`,
+
+  'vocab-blank': VOCAB_QUIZ_HEADER + `
+유형: [<보기> 빈칸에 들어가기 어색한 단어 고르기]
+- 주어진 단어 5개 각각에 대해 그 단어가 자연스럽게 들어갈 빈칸 문장 5개를 만든다(단어 1:1 대응).
+- 정확히 1개 단어는 대응 문장의 빈칸에 넣었을 때 **문맥상 어색**하도록 구성(나머지 4개는 적합).
+- markedPassage = "<b>&lt;보기&gt;</b><br>1. 문장 ___빈칸___<br>2. ...<br>3. ...<br>4. ...<br>5. ..." (빈칸은 "_______").
+- choices 5개 = 단어 5개("① word" 형식).
+- answer = 빈칸에 넣기 어색한 단어의 번호.
+- stem: "다음 <보기> 문장의 빈칸에 들어가기 어색한 단어를 고르시오."`,
+
+  'vocab-passage': VOCAB_QUIZ_HEADER + `
+유형: [지문 밑줄 어휘 쓰임 — 수능 30번형]
+- 주어진 단어 5개를 모두 포함하는 **하나의 자연스러운 짧은 영어 지문(6~9문장)**을 창작.
+- 지문 속 그 5개 단어를 등장 순서대로 <u>①&nbsp;word</u>, <u>②&nbsp;word</u>, ... <u>⑤&nbsp;word</u> 로 밑줄(번호를 밑줄 안 맨 앞).
+- 정확히 1개는 문맥상 반대/부적절한 낱말로 바꿔(예: increase↔decrease) 쓰고, 나머지 4개는 적절히.
+- markedPassage = 지문 전문(①~⑤ 밑줄 포함).
+- choices 5개 = ["①","②","③","④","⑤"] 로 고정(지문 내 밑줄이 선지 역할).
+- answer = 부적절한 낱말 번호.
+- stem: "다음 글의 밑줄 친 부분 중, 문맥상 낱말의 쓰임이 적절하지 않은 것은?"`,
+
+  'vocab-synonym': VOCAB_QUIZ_HEADER + `
+유형: [동의어 고르기]
+- 주어진 단어 중 1개를 정답 단어로 골라, 그 단어가 들어간 예문 1개를 만들고 예문 속 그 단어에 <u>단어</u> 밑줄.
+- choices 5개 = 영어 단어. 그 중 1개는 밑줄 단어의 **동의어**(정답), 나머지 4개는 매력적 오답(반의어·혼동어 등). 보기 단어는 주어진 목록 외 어휘도 활용 가능.
+- markedPassage = 예문 1문장(밑줄 포함).
+- answer = 동의어 번호.
+- stem: "다음 밑줄 친 단어와 의미가 가장 가까운 것은?"`,
+
+  'vocab-antonym': VOCAB_QUIZ_HEADER + `
+유형: [반의어 고르기]
+- vocab-synonym 과 동일 구조이되 정답이 **반의어**.
+- choices 5개 = 영어 단어(1개 반의어 정답 + 매력적 오답 4).
+- markedPassage = 예문 1문장(밑줄 단어 포함).
+- stem: "다음 밑줄 친 단어와 의미가 반대되는 것은?"`,
+
+  'vocab-def': VOCAB_QUIZ_HEADER + `
+유형: [영영풀이에 맞는 단어 고르기]
+- 주어진 단어 중 1개를 정답으로 골라 그 단어의 **영영 정의(English definition)**를 제시.
+- markedPassage = 영영 정의문(예: "<b>Definition:</b> to make something less severe or serious").
+- choices 5개 = 영어 단어(정의에 해당하는 정답 1 + 혼동 오답 4).
+- answer = 정의에 맞는 단어 번호.
+- stem: "다음 영영풀이가 설명하는 단어로 가장 적절한 것은?"`
+};
+
+// 어휘 문제 프롬프트 빌드 — 단어 목록 + 난이도/개수 치환
+function buildVocabQuizPrompt(type, diff, count) {
+  const diffMap = { low: '쉬움', mid: '보통', high: '어려움(수능 최고난도)' };
+  const tpl = VOCAB_QUIZ_PROMPTS[type] || VOCAB_QUIZ_PROMPTS['vocab-usage'];
+  return tpl
+    .replace(/DIFFICULTY_PLACEHOLDER/g, diffMap[diff] || '보통')
+    .replace(/OBJ_COUNT_PLACEHOLDER/g, String(count || 1));
+}
+
 // ── 라운드 8: 지문 채점 프롬프트 (중요도/난이도/유형 적합도) ──
 const PASSAGE_SCORING_PROMPT = `영어 지문 1개를 채점. JSON만 응답.
 {"importance":7,"difficulty":6,"typeSuitability":{"내용유추":8,"내용일치/불일치":6,"밑줄함의/지칭추론":7,"분위기/어조/심경":3,"순서":5,"연결어":5,"문장삽입":6,"삭제":5,"빈칸추론":9,"어법":4,"어휘/영영풀이":5,"제목/주제/목적/요약/주장":8,"영작(서술형)":6}}

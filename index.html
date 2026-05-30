@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Logic Flow Mapper</title>
-<link rel="stylesheet" href="css/style.css?v=32">
+<link rel="stylesheet" href="css/style.css?v=33">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -63,6 +63,12 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/></svg>
       <span>단어</span>
       <span class="sidebar-indicator-dot" id="sidebar-dot-word" style="display:none"></span>
+    </button>
+    <button class="sidebar-item" data-panel="vocabquiz" onclick="switchPanel('vocabquiz')">
+      <span class="sidebar-abbr">휘</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M9 7h6"/><path d="M9 11h4"/><circle cx="16.5" cy="14.5" r="2.2"/></svg>
+      <span>어휘 문제</span>
+      <span class="sidebar-indicator-dot" id="sidebar-dot-vocabquiz" style="display:none"></span>
     </button>
     <button class="sidebar-item" data-panel="translate" onclick="switchPanel('translate')">
       <span class="sidebar-abbr">해</span>
@@ -894,6 +900,126 @@
         </div>
       </div>
 
+      <!-- 어휘 문제 Panel (단어장 → 예문·문제 생성, 변형문제 PDF/UI 재사용) -->
+      <div class="panel" id="panel-vocabquiz" style="display:none">
+        <div class="panel-split">
+          <!-- 좌측: 단어장 선택 -->
+          <div class="panel-split-left">
+            <div class="home-card range-card">
+              <h2 class="home-card-title">단어장 선택</h2>
+              <div class="vq-bank-list" id="vqBankList"></div>
+              <div class="range-summary" id="vqBankSummary">선택된 단어장: 0개</div>
+              <div class="vq-bank-actions">
+                <button class="vq-bank-btn" onclick="openWordBankModal()">+ 새 단어장</button>
+                <button class="vq-bank-btn" onclick="editSelectedWordBank()">편집</button>
+                <button class="vq-bank-btn danger" onclick="deleteSelectedWordBank()">삭제</button>
+              </div>
+            </div>
+          </div>
+          <!-- 중앙: 출제 옵션 -->
+          <div class="panel-split-mid">
+            <div class="home-card scroll-card options-card">
+              <h2 class="home-card-title">출제 옵션</h2>
+              <div class="scroll-card-body">
+                <div class="batch-row">
+                  <label class="batch-label">시험지 제목</label>
+                  <input type="text" id="vqPaperTitle" class="form-control" placeholder="어휘 문제" maxlength="60">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">부제목</label>
+                  <input type="text" id="vqPaperSubtitle" class="form-control" placeholder="(자동: 단어장·문항 수)" maxlength="120">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">객관식 개수</label>
+                  <input type="number" id="vqObj" class="form-control" value="20" min="0">
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">난이도</label>
+                  <select id="vqDiff" class="form-control">
+                    <option value="low">하</option>
+                    <option value="mid" selected>중</option>
+                    <option value="high">상 (수능 최고난도)</option>
+                  </select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">문제 유형</label>
+                  <div class="multi-dropdown" id="vqTypeDropdown">
+                    <button type="button" class="multi-dropdown-btn">
+                      <span class="multi-dropdown-label placeholder">선택하세요</span>
+                      <svg class="multi-dropdown-caret" viewBox="0 0 12 12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg>
+                    </button>
+                    <div class="multi-dropdown-panel">
+                      <label class="multi-dropdown-item multi-dropdown-select-all">
+                        <input type="checkbox" data-role="select-all">
+                        <span>전체 선택</span>
+                      </label>
+                      <div class="multi-dropdown-divider"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 프로바이더</label>
+                  <select id="vqProvider" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">AI 모델</label>
+                  <select id="vqModel" class="form-control"></select>
+                </div>
+                <div class="batch-row">
+                  <label class="batch-label">작업량</label>
+                  <select id="vqEffort" class="form-control"></select>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">빠름 모드</div>
+                      <div class="option-toggle-desc">속도 우선(작업량 낮음 고정)</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="vqFast"><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">시험지 표지 생성</div>
+                      <div class="option-toggle-desc">첫 페이지에 시험 제목·범위·날짜 표지 생성</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="vqIncludeCover" checked><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+                <div class="option-toggle-row single">
+                  <div class="option-toggle">
+                    <div class="option-toggle-info">
+                      <div class="option-toggle-name">해설지 별도 PDF</div>
+                      <div class="option-toggle-desc">체크 시 문제지와 해설지를 별도 파일로</div>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="vqAnswerSeparate" checked><span class="toggle-slider"></span></label>
+                  </div>
+                </div>
+              </div>
+              <div class="sticky-actions">
+                <button class="btn-analyze" id="vqStartBtn" onclick="startVqJob()">어휘 문제 생성</button>
+              </div>
+            </div>
+          </div>
+          <!-- 우측: 진행 상황 + 다운로드 -->
+          <div class="panel-split-right">
+            <div class="job-switcher" id="vqJobSwitcher" style="display:none"></div>
+            <div class="home-card progress-card" id="vqProgressCard">
+              <div class="progress-card-header">
+                <h2 class="home-card-title">진행 상황</h2>
+                <button class="btn-cancel-inline" id="vqCancelBtn" onclick="cancelVqJob()" style="visibility:hidden">중단</button>
+              </div>
+              <div class="progress-card-body" id="vqProgressBody"></div>
+              <div class="empty-state" id="vqEmptyState">진행 중인 작업이 없습니다</div>
+              <div class="downloads-inline" id="vqDownloadsCard" style="display:none">
+                <div class="downloads-body" id="vqDownloadArea"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Comic Generation Panel -->
       <div class="panel" id="panel-comic" style="display:none">
         <div class="panel-split">
@@ -1159,6 +1285,26 @@
     </div>
   </div>
 </div>
+<!-- 단어장 관리 모달 -->
+<div id="wordBankModal" class="api-key-modal" style="display:none">
+  <div class="api-key-modal-backdrop" onclick="closeWordBankModal()"></div>
+  <div class="api-key-modal-card">
+    <h2 id="wordBankModalTitle">새 단어장</h2>
+    <p class="api-key-help">
+      단어장 이름과 단어 목록을 입력하세요. 한 줄에 단어 하나씩, 뜻은 선택입니다.<br>
+      형식: <b>celebrated</b> 또는 <b>celebrated, 유명한</b> (콤마 또는 탭으로 뜻 구분)
+    </p>
+    <label class="api-key-label">단어장 이름</label>
+    <input id="wordBankName" type="text" placeholder="예: 수능 빈출 어휘 1" maxlength="60">
+    <label class="api-key-label">단어 목록 <span class="api-key-hint">(한 줄에 하나)</span></label>
+    <textarea id="wordBankWords" rows="10" placeholder="celebrated, 유명한&#10;inevitable, 불가피한&#10;profound&#10;diminish, 줄어들다"></textarea>
+    <div class="api-key-actions">
+      <button type="button" class="api-key-btn-cancel" onclick="closeWordBankModal()">취소</button>
+      <button type="button" class="api-key-btn-save" onclick="saveWordBankFromModal()">저장</button>
+    </div>
+    <div id="wordBankMsg" class="api-key-msg"></div>
+  </div>
+</div>
 <div class="save-toast" id="toast"></div>
 
 <script src="js/firebase-config.js?v=2"></script>
@@ -1173,17 +1319,18 @@
 <script src="js/db-readingmaster.js?v=1"></script>
 <script src="js/db-hackers.js?v=2"></script>
 <script src="js/db-ted.js?v=2"></script>
-<script src="js/api.js?v=35"></script>
+<script src="js/api.js?v=36"></script>
 <script src="js/progress-checklist.js?v=2"></script>
-<script src="js/job-manager.js?v=4"></script>
-<script src="js/app.js?v=40"></script>
+<script src="js/job-manager.js?v=5"></script>
+<script src="js/app.js?v=41"></script>
 <script src="js/batch.js?v=22"></script>
 <script src="js/range-tree.js?v=3"></script>
 <script src="js/pdf-export.js?v=5"></script>
 <script src="js/workbook.js?v=7"></script>
-<script src="js/variant.js?v=15"></script>
+<script src="js/variant.js?v=16"></script>
 <script src="js/word-tab.js?v=1"></script>
 <script src="js/translate-tab.js?v=1"></script>
+<script src="js/vocab-quiz.js?v=1"></script>
 <script src="js/comic-generation.js?v=1"></script>
 <script src="js/dashboard.js?v=3"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>

@@ -235,7 +235,7 @@ class JobManager {
   // 토스트 피드백
   _showJobAddedToast(job) {
     const label = this._safeLabel(job);
-    const featureLabels = { variant: '변형문제', batch: '일괄 상세분석', workbook: '워크북', word: '단어', translate: '해석', mcq: '기본 객관식', comic: '만화' };
+    const featureLabels = { variant: '변형문제', batch: '일괄 상세분석', workbook: '워크북', word: '단어', translate: '해석', mcq: '기본 객관식', vocabquiz: '어휘 문제', comic: '만화' };
     const kindLabel = featureLabels[this.featureKey] || this.featureKey;
 
     // 기존 토스트 있으면 제거
@@ -351,13 +351,13 @@ class JobManager {
 // 각 기능에서 JobManager 생성 시 window._jobManagers[featureKey] 에 등록
 if (typeof window !== 'undefined') {
   window._jobManagers = window._jobManagers || {};
-  window._sidebarIndicators = window._sidebarIndicators || { variant: 0, batch: 0, workbook: 0, comic: 0, word: 0, translate: 0, mcq: 0 };
+  window._sidebarIndicators = window._sidebarIndicators || { variant: 0, batch: 0, workbook: 0, comic: 0, word: 0, translate: 0, mcq: 0, vocabquiz: 0 };
 }
 
 function updateSidebarIndicators() {
   if (typeof window === 'undefined') return;
   const managers = window._jobManagers || {};
-  const map = { variant: 0, batch: 0, workbook: 0, comic: 0, word: 0, translate: 0, mcq: 0 };
+  const map = { variant: 0, batch: 0, workbook: 0, comic: 0, word: 0, translate: 0, mcq: 0, vocabquiz: 0 };
   for (const key of Object.keys(map)) {
     const mgr = managers[key];
     if (mgr && typeof mgr.runningCount === 'function') {
