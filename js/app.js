@@ -3,7 +3,6 @@ const BOOKS = {
   '수능특강 영어': DB_ENGLISH,
   '수능특강 영어독해연습': DB_READING,
   'N기출 영어 고난도 독해': DB_NGICHUL,
-  'N기출 영어 고난도 독해 LEVEL2': DB_NGICHUL2,
   '2603H3': DB_2603H3,
   '목동고1 추가지문': DB_MOKDONG1,
   '영어독해와작문 비상(김진완)': DB_BISANG_RW,
