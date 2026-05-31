@@ -28,11 +28,14 @@ function loadWordBanksLocal() {
 function saveWordBanksLocal() {
   try { localStorage.setItem(VQ_LS_KEY, JSON.stringify(wordBanks)); } catch (e) {}
 }
+// 단어장은 사용자 본인 문서(users/{uid}.wordBanks 맵)에 저장한다.
+// (별도 word_banks 컬렉션은 Firestore 보안 규칙이 막혀 있어 — 본인 users 문서는 read/write 허용됨)
 async function loadWordBanksFromFirestore() {
   if (typeof db === 'undefined' || !currentUser) return;
   try {
-    const snap = await db.collection('word_banks').where('ownerUid', '==', currentUser.uid).get();
-    snap.forEach(doc => { const d = doc.data(); if (d && d.id) wordBanks[d.id] = d; });
+    const d = await db.collection('users').doc(currentUser.uid).get();
+    const fsBanks = (d.exists && d.data() && d.data().wordBanks) ? d.data().wordBanks : {};
+    Object.keys(fsBanks).forEach(id => { wordBanks[id] = fsBanks[id]; });   // Firestore = 최신 기준
     saveWordBanksLocal();
     renderVqBankList();
   } catch (e) { console.warn('[vocab] firestore load failed', e && e.message); }
@@ -40,18 +43,19 @@ async function loadWordBanksFromFirestore() {
 async function persistWordBank(bank) {
   if (typeof db === 'undefined' || !currentUser) return;
   try {
-    await db.collection('word_banks').doc(bank.id).set({
-      ...bank,
-      ownerUid: currentUser.uid,
-      ownerEmail: currentUser.email || '',
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    // 중첩 맵 merge — 다른 단어장 보존하며 해당 id 만 갱신
+    await db.collection('users').doc(currentUser.uid).set({
+      wordBanks: { [bank.id]: { ...bank, updatedAt: Date.now() } }
     }, { merge: true });
   } catch (e) { console.warn('[vocab] firestore save failed', e && e.message); }
 }
 async function deleteWordBankFromDb(id) {
   if (typeof db === 'undefined' || !currentUser) return;
-  try { await db.collection('word_banks').doc(id).delete(); }
-  catch (e) { console.warn('[vocab] firestore delete failed', e && e.message); }
+  try {
+    await db.collection('users').doc(currentUser.uid).update({
+      ['wordBanks.' + id]: firebase.firestore.FieldValue.delete()
+    });
+  } catch (e) { console.warn('[vocab] firestore delete failed', e && e.message); }
 }
 
 // 텍스트 → [{word, meaningKo}]  (한 줄에 하나, "단어" 또는 "단어, 뜻" / 탭 구분)
