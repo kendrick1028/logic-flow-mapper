@@ -193,51 +193,120 @@ async function finishTranslateJob(job) {
 const _SUP = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹'];
 function _supNum(n) { return String(n).split('').map(d => _SUP[+d] || d).join(''); }
 
-// 한 지문 = 헤더 섹션 + 문단별 섹션(atomic). 문단 = 영문 단락(번호 위첨자) + 한글 해석.
-function _translateSections(entry, isFirst) {
-  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 한 지문의 헤더 + 문단 블록 HTML. 각 헤더/문단을 .tp-blk 로 감싼다(슬라이스 경계용).
+function _tpEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _tpPassageHtml(entry) {
   const { item, titleKo, paragraphs } = entry;
   const numText = (String(item.num).match(/\d+/) ? String(item.num).match(/\d+/)[0] + '번' : item.num);
-  const out = [];
-  // 헤더
-  out.push({
-    pageBreakBefore: !isFirst,
-    atomic: true,
-    html: `<div style="display:flex;align-items:baseline;gap:12px;padding:2px 0 14px;border-bottom:1px solid #ebebeb;margin-bottom:14px">` +
-      `<span style="font-size:22px;font-weight:800;color:#4f6ef7">${e(numText)}</span>` +
-      (titleKo ? `<span style="font-size:15px;font-weight:700;color:#1a1a1a">${e(titleKo)}</span>` : '') + `</div>`
+  let h = `<div class="tp-blk" style="display:flex;align-items:baseline;gap:12px;padding:2px 0 12px;border-bottom:1px solid #ebebeb;margin-bottom:12px">` +
+    `<span style="font-size:22px;font-weight:800;color:#4f6ef7">${_tpEsc(numText)}</span>` +
+    (titleKo ? `<span style="font-size:15px;font-weight:700;color:#1a1a1a">${_tpEsc(titleKo)}</span>` : '') + `</div>`;
+  (paragraphs || []).forEach(p => {
+    const sents = p.sentences || [];
+    const en = sents.map(s => `<sup style="color:#4f6ef7;font-weight:800">${_supNum(s.id)}</sup>${_tpEsc(s.en || '')}`).join(' ');
+    const ko = sents.map(s => `<div style="margin:3px 0"><sup style="color:#4f6ef7;font-weight:800">${_supNum(s.id)}</sup>${_tpEsc(s.ko || '')}</div>`).join('');
+    h += `<div class="tp-blk" style="margin-bottom:15px">` +
+      `<div style="font-size:14px;line-height:1.75;color:#1a1a1a;margin-bottom:7px">${en}</div>` +
+      `<div style="font-size:13.5px;line-height:1.7;color:#555;background:#f7f8fb;border-left:3px solid #cdd6f5;border-radius:4px;padding:8px 11px">${ko}</div>` +
+      `</div>`;
   });
-  // 문단별 섹션 (atomic → 문단 단위로 페이지 넘김, 문장 잘림 방지)
-  paragraphs.forEach((p, pi) => {
-    const sents = (p.sentences || []);
-    const enLine = sents.map(s => `<sup style="color:#4f6ef7;font-weight:800">${_supNum(s.id)}</sup>${e(s.en || '')}`).join(' ');
-    const koLines = sents.map(s => `<div style="margin:3px 0"><sup style="color:#4f6ef7;font-weight:800">${_supNum(s.id)}</sup>${e(s.ko || '')}</div>`).join('');
-    out.push({
-      atomic: true,
-      html: `<div style="margin-bottom:16px;break-inside:avoid">` +
-        `<div style="font-size:14px;line-height:1.75;color:#1a1a1a;margin-bottom:7px">${enLine}</div>` +
-        `<div style="font-size:13.5px;line-height:1.7;color:#555;background:#f7f8fb;border-left:3px solid #cdd6f5;border-radius:4px;padding:8px 11px">${koLines}</div>` +
-        `</div>`
-    });
-  });
+  return h;
+}
+
+// 오프스크린 캡처 헬퍼 (머릿말/꼬릿말용)
+async function _tpCapture(container, html, w, contentWmm) {
+  const d = document.createElement('div');
+  d.style.cssText = `width:${w}px;background:#fff`;
+  d.innerHTML = html;
+  container.appendChild(d);
+  const c = await html2canvas(d, { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true });
+  const out = { dataUrl: c.toDataURL('image/jpeg', 0.92), h: contentWmm * (c.height / c.width) };
+  container.removeChild(d);
   return out;
 }
 
+// 지문 1개당 html2canvas 1회만 호출 → 렌더된 캔버스를 문단(.tp-blk) 경계에서 잘라
+// 페이지에 배치. 문장/문단 중간 잘림 없이, 캡처 횟수를 대폭 줄여 속도 개선.
 async function buildTranslatePdf(job) {
-  const sections = [];
-  const docIds = job.queue.map(it => `${it.book}__${it.unit}__${it.num}`).filter(d => job.transByDoc[d]);
-  docIds.forEach((docId, i) => {
-    _translateSections(job.transByDoc[docId], i === 0).forEach(s => sections.push(s));
-  });
+  if (typeof html2canvas === 'undefined' || !window.jspdf) throw new Error('PDF 라이브러리를 불러오지 못했습니다.');
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const pageW = 210, pageH = 297, mx = 12, my = 15, footerH = 10, subHdrH = 9, capW = 750;
+  const contentW = pageW - mx * 2;          // 186mm
+  const bottomLimit = pageH - my - footerH; // 272mm
+  const newPageTop = my + subHdrH;          // 24mm (2페이지+)
+  const mmPerPx = contentW / capW;
+
   const book = job.queue[0] ? job.queue[0].book : '';
   const units = [...new Set(job.queue.map(it => it.unit))].join(', ');
-  return buildPdfFromSections(sections, {
-    title: `해석 · ${book}`,
-    subtitle: units,
-    filename: `해석_${String(book).replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`,
-    columns: 1,
-    atomicSections: true
-  });
+  const title = `해석 · ${book}`, subtitle = units;
+  const docIds = job.queue.map(it => `${it.book}__${it.unit}__${it.num}`).filter(d => job.transByDoc[d]);
+
+  const container = document.createElement('div');
+  container.style.cssText = `position:absolute;left:-9999px;top:0;width:${capW}px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif`;
+  document.body.appendChild(container);
+
+  try {
+    let firstPassage = true;
+    for (const docId of docIds) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `width:${capW}px;background:#fff`;
+      wrap.innerHTML = _tpPassageHtml(job.transByDoc[docId]);
+      container.appendChild(wrap);
+
+      const cTop = wrap.getBoundingClientRect().top;
+      const bounds = Array.from(wrap.querySelectorAll('.tp-blk'))
+        .map(b => b.getBoundingClientRect().bottom - cTop);   // 각 블록 bottom (css px)
+      const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: '#ffffff', logging: false, useCORS: true });
+      const totalCss = wrap.getBoundingClientRect().height;
+      const sPx = canvas.height / totalCss;                   // canvas px per css px
+
+      if (!firstPassage) pdf.addPage();
+      let y = firstPassage ? my : newPageTop;
+      firstPassage = false;
+
+      let startCss = 0;
+      while (startCss < totalCss - 0.5) {
+        const availCss = (bottomLimit - y) / mmPerPx;
+        // [startCss, startCss+availCss] 안에서 가장 큰 블록 경계
+        let cut = -1;
+        for (const b of bounds) { if (b > startCss + 0.5 && b <= startCss + availCss + 0.5) cut = b; }
+        if (cut < 0) {
+          // 한 블록이 페이지보다 큼 → 강제 분할(드묾)
+          if (availCss < 10) { pdf.addPage(); y = newPageTop; continue; }
+          cut = Math.min(startCss + availCss, totalCss);
+        }
+        const sy = Math.round(startCss * sPx), sh = Math.max(1, Math.round((cut - startCss) * sPx));
+        const slice = document.createElement('canvas');
+        slice.width = canvas.width; slice.height = sh;
+        slice.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+        const imgH = (cut - startCss) * mmPerPx;
+        pdf.addImage(slice.toDataURL('image/jpeg', 0.9), 'JPEG', mx, y, contentW, imgH);
+        y += imgH;
+        startCss = cut;
+        if (startCss < totalCss - 0.5) { pdf.addPage(); y = newPageTop; }
+      }
+      container.removeChild(wrap);
+    }
+
+    // 머릿말(2p+) / 꼬릿말 / 페이지번호
+    const subImg = await _tpCapture(container, `<div style="width:${capW}px;padding:3px 0 6px;border-bottom:1.5px solid #bbb"><span style="font-size:12px;color:#555;font-weight:700">${_tpEsc(title)} <span style="color:#aaa;margin:0 8px">·</span> ${_tpEsc(subtitle)}</span></div>`, capW, contentW);
+    const ftrImg = await _tpCapture(container, `<div style="width:${capW}px;padding:6px 0 0;border-top:1.5px solid #bbb;display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;color:#666;font-weight:700">송유근 영어</span><span style="font-size:11px;color:#666;font-weight:600">최고의 강의 &amp; 철저한 관리</span></div>`, capW, contentW);
+    const total = pdf.internal.getNumberOfPages();
+    for (let p = 1; p <= total; p++) {
+      pdf.setPage(p);
+      if (p > 1) pdf.addImage(subImg.dataUrl, 'JPEG', mx, my - 2, contentW, subImg.h);
+      const fy = pageH - my + 2;
+      pdf.addImage(ftrImg.dataUrl, 'JPEG', mx, fy, contentW, ftrImg.h);
+      pdf.setFontSize(9); pdf.setTextColor(100, 100, 100);
+      pdf.text(`- ${p} / ${total} -`, pageW / 2, fy + ftrImg.h + 3, { align: 'center' });
+    }
+  } finally {
+    document.body.removeChild(container);
+  }
+
+  const filename = `해석_${String(book).replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  return { save(f) { pdf.save(f || filename); }, get blob() { return pdf.output('blob'); }, pdf };
 }
 
 function updateTranslateUI(job) {
